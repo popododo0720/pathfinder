@@ -42,11 +42,19 @@ func newPlanCommand() *cobra.Command {
 				return fmt.Errorf("get source port %q: %w", source, err)
 			}
 
+			destinationPort, err := cloud.GetPort(ctx, networkClient, destination)
+			if err != nil {
+				return fmt.Errorf("get destination port %q: %w", destination, err)
+			}
+
 			command.Printf("source ID: %s\n", sourcePort.ID)
 			command.Printf("source name: %s\n", sourcePort.Name)
 			command.Printf("source status: %s\n", sourcePort.Status)
 			command.Printf("source MAC: %s\n", sourcePort.MACAddress)
-			command.Printf("destination: %s\n", destination)
+			command.Printf("destination: %s\n", destinationPort.ID)
+			command.Printf("destination name: %s\n", destinationPort.Name)
+			command.Printf("destination status: %s\n", destinationPort.Status)
+			command.Printf("destination MAC: %s\n", destinationPort.MACAddress)
 			command.Printf("microflow: %s\n", microflow)
 			command.Printf("minimal: %t\n", minimal)
 
