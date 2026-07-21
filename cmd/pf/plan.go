@@ -51,16 +51,41 @@ func newPlanCommand() *cobra.Command {
 			command.Printf("source name: %s\n", sourcePort.Name)
 			command.Printf("source status: %s\n", sourcePort.Status)
 			command.Printf("source MAC: %s\n", sourcePort.MACAddress)
-			command.Printf("destination: %s\n", destinationPort.ID)
+			command.Printf("source network ID: %s\n", sourcePort.NetworkID)
+			for index, fixedIP := range sourcePort.FixedIPs {
+				command.Printf(
+					"source fixed IP[%d]: %s (subnet: %s)\n",
+					index,
+					fixedIP.IPAddress,
+					fixedIP.SubnetID,
+				)
+			}
+			command.Printf("destination ID: %s\n", destinationPort.ID)
 			command.Printf("destination name: %s\n", destinationPort.Name)
 			command.Printf("destination status: %s\n", destinationPort.Status)
 			command.Printf("destination MAC: %s\n", destinationPort.MACAddress)
+			command.Printf(
+				"destination network ID: %s\n",
+				destinationPort.NetworkID,
+			)
+
+			for index, fixedIP := range destinationPort.FixedIPs {
+				command.Printf(
+					"destination fixed IP[%d]: %s (subnet: %s)\n",
+					index,
+					fixedIP.IPAddress,
+					fixedIP.SubnetID,
+				)
+			}
 			command.Printf("microflow: %s\n", microflow)
 			command.Printf("minimal: %t\n", minimal)
 
 			for index, state := range connectionStates {
 				command.Printf("ct[%d]: %s\n", index, state)
 			}
+
+			sameNetwork := sourcePort.NetworkID == destinationPort.NetworkID
+			command.Printf("same network: %t\n", sameNetwork)
 
 			return nil
 		},
