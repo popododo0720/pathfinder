@@ -37,43 +37,42 @@ func newPlanCommand() *cobra.Command {
 				return fmt.Errorf("create Neutron client: %w", err)
 			}
 
-			sourcePort, err := cloud.GetPort(ctx, networkClient, source)
+			sourceEndpoint, err := cloud.GetEndpoint(ctx, networkClient, source)
 			if err != nil {
 				return fmt.Errorf("get source port %q: %w", source, err)
 			}
 
-			destinationPort, err := cloud.GetPort(ctx, networkClient, destination)
+			destinationEndpoint, err := cloud.GetEndpoint(ctx, networkClient, destination)
 			if err != nil {
 				return fmt.Errorf("get destination port %q: %w", destination, err)
 			}
 
-			command.Printf("source ID: %s\n", sourcePort.ID)
-			command.Printf("source name: %s\n", sourcePort.Name)
-			command.Printf("source status: %s\n", sourcePort.Status)
-			command.Printf("source MAC: %s\n", sourcePort.MACAddress)
-			command.Printf("source network ID: %s\n", sourcePort.NetworkID)
-			for index, fixedIP := range sourcePort.FixedIPs {
+			command.Printf("source ID: %s\n", sourceEndpoint.PortID)
+			command.Printf("source name: %s\n", sourceEndpoint.Name)
+			command.Printf("source status: %s\n", sourceEndpoint.Status)
+			command.Printf("source MAC: %s\n", sourceEndpoint.MACAddress)
+			command.Printf("source network ID: %s\n", sourceEndpoint.NetworkID)
+			for index, fixedIP := range sourceEndpoint.FixedIPs {
 				command.Printf(
 					"source fixed IP[%d]: %s (subnet: %s)\n",
 					index,
-					fixedIP.IPAddress,
+					fixedIP.Address,
 					fixedIP.SubnetID,
 				)
 			}
-			command.Printf("destination ID: %s\n", destinationPort.ID)
-			command.Printf("destination name: %s\n", destinationPort.Name)
-			command.Printf("destination status: %s\n", destinationPort.Status)
-			command.Printf("destination MAC: %s\n", destinationPort.MACAddress)
+			command.Printf("destination ID: %s\n", destinationEndpoint.PortID)
+			command.Printf("destination name: %s\n", destinationEndpoint.Name)
+			command.Printf("destination status: %s\n", destinationEndpoint.Status)
+			command.Printf("destination MAC: %s\n", destinationEndpoint.MACAddress)
 			command.Printf(
 				"destination network ID: %s\n",
-				destinationPort.NetworkID,
+				destinationEndpoint.NetworkID,
 			)
-
-			for index, fixedIP := range destinationPort.FixedIPs {
+			for index, fixedIP := range destinationEndpoint.FixedIPs {
 				command.Printf(
 					"destination fixed IP[%d]: %s (subnet: %s)\n",
 					index,
-					fixedIP.IPAddress,
+					fixedIP.Address,
 					fixedIP.SubnetID,
 				)
 			}
@@ -84,7 +83,7 @@ func newPlanCommand() *cobra.Command {
 				command.Printf("ct[%d]: %s\n", index, state)
 			}
 
-			sameNetwork := sourcePort.NetworkID == destinationPort.NetworkID
+			sameNetwork := sourceEndpoint.SameNetwork(destinationEndpoint)
 			command.Printf("same network: %t\n", sameNetwork)
 
 			return nil
