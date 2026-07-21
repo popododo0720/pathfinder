@@ -1,0 +1,16 @@
+# Go build outputs
+/bin/
+/pf
+*.test
+*.out
+coverage.out
+
+# Editors
+.vscode/
+.idea/
+
+# Local credentials
+.env
+clouds.yaml
+*-openrc.sh
+
