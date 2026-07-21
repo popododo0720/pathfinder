@@ -1,6 +1,12 @@
 package main
 
-import "github.com/spf13/cobra"
+import (
+	"fmt"
+
+	"pathfinder/internal/cloud"
+
+	"github.com/spf13/cobra"
+)
 
 func newPlanCommand() *cobra.Command {
 	var connectionStates []string
@@ -15,7 +21,7 @@ func newPlanCommand() *cobra.Command {
 			return validateConnectionStates(connectionStates)
 		},
 
-		Run: func(command *cobra.Command, args []string) {
+		RunE: func(command *cobra.Command, args []string) error {
 			source := args[0]
 			destination := args[1]
 
@@ -24,7 +30,22 @@ func newPlanCommand() *cobra.Command {
 				microflow = args[2]
 			}
 
-			command.Printf("source: %s\n", source)
+			ctx := command.Context()
+
+			networkClient, err := cloud.NewNetworkClient(ctx)
+			if err != nil {
+				return fmt.Errorf("create Neutron client: %w", err)
+			}
+
+			sourcePort, err := cloud.GetPort(ctx, networkClient, source)
+			if err != nil {
+				return fmt.Errorf("get source port %q: %w", source, err)
+			}
+
+			command.Printf("source ID: %s\n", sourcePort.ID)
+			command.Printf("source name: %s\n", sourcePort.Name)
+			command.Printf("source status: %s\n", sourcePort.Status)
+			command.Printf("source MAC: %s\n", sourcePort.MACAddress)
 			command.Printf("destination: %s\n", destination)
 			command.Printf("microflow: %s\n", microflow)
 			command.Printf("minimal: %t\n", minimal)
@@ -32,6 +53,8 @@ func newPlanCommand() *cobra.Command {
 			for index, state := range connectionStates {
 				command.Printf("ct[%d]: %s\n", index, state)
 			}
+
+			return nil
 		},
 	}
 
