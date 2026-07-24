@@ -6,12 +6,17 @@ type FixedIP struct {
 }
 
 type Endpoint struct {
-	PortID     string
-	Name       string
-	Status     string
-	MACAddress string
-	NetworkID  string
-	FixedIPs   []FixedIP
+	PortID      string
+	Name        string
+	Status      string
+	MACAddress  string
+	NetworkID   string
+	DeviceID    string
+	DeviceOwner string
+	HostID      string
+	VIFType     string
+	VNICType    string
+	FixedIPs    []FixedIP
 }
 
 func (endpoint Endpoint) SameNetwork(other Endpoint) bool {

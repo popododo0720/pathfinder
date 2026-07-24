@@ -60,6 +60,11 @@ func newPlanCommand() *cobra.Command {
 					fixedIP.SubnetID,
 				)
 			}
+			command.Printf("source device owner: %s\n", sourceEndpoint.DeviceOwner)
+			command.Printf("source device ID: %s\n", sourceEndpoint.DeviceID)
+			command.Printf("source host ID: %s\n", sourceEndpoint.HostID)
+			command.Printf("source VIF type: %s\n", sourceEndpoint.VIFType)
+			command.Printf("source VNIC type: %s\n", sourceEndpoint.VNICType)
 			command.Printf("destination ID: %s\n", destinationEndpoint.PortID)
 			command.Printf("destination name: %s\n", destinationEndpoint.Name)
 			command.Printf("destination status: %s\n", destinationEndpoint.Status)
@@ -76,6 +81,26 @@ func newPlanCommand() *cobra.Command {
 					fixedIP.SubnetID,
 				)
 			}
+			command.Printf(
+				"destination device owner: %s\n",
+				destinationEndpoint.DeviceOwner,
+			)
+			command.Printf(
+				"destination device ID: %s\n",
+				destinationEndpoint.DeviceID,
+			)
+			command.Printf(
+				"destination host ID: %s\n",
+				destinationEndpoint.HostID,
+			)
+			command.Printf(
+				"destination VIF type: %s\n",
+				destinationEndpoint.VIFType,
+			)
+			command.Printf(
+				"destination VNIC type: %s\n",
+				destinationEndpoint.VNICType,
+			)
 			command.Printf("microflow: %s\n", microflow)
 			command.Printf("minimal: %t\n", minimal)
 
