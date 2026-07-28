@@ -32,6 +32,8 @@ func newPlanCommand() *cobra.Command {
 	var hostMappings []string
 	var ovsContainer string
 	var integrationBridge string
+	var summaryOnly bool
+	var failOnBroken bool
 
 	command := &cobra.Command{
 		Use:   "plan SOURCE DESTINATION [MICROFLOW]",
@@ -73,33 +75,34 @@ func newPlanCommand() *cobra.Command {
 				return err
 			}
 
-			if err := report.WriteNeutron(
-				command.OutOrStdout(),
-				path,
-			); err != nil {
-				return fmt.Errorf("write report: %w", err)
-			}
-
 			writer := command.OutOrStdout()
-			fmt.Fprintf(writer, "microflow: %s\n", microflow)
-			fmt.Fprintf(writer, "minimal: %t\n", minimal)
+			if !summaryOnly {
+				if err := report.WriteNeutron(writer, path); err != nil {
+					return fmt.Errorf("write report: %w", err)
+				}
 
-			for index, state := range connectionStates {
-				fmt.Fprintf(
-					writer,
-					"ct[%d]: %s\n",
-					index,
-					state,
-				)
+				fmt.Fprintf(writer, "microflow: %s\n", microflow)
+				fmt.Fprintf(writer, "minimal: %t\n", minimal)
+
+				for index, state := range connectionStates {
+					fmt.Fprintf(
+						writer,
+						"ct[%d]: %s\n",
+						index,
+						state,
+					)
+				}
 			}
 
 			var ovnObservation *topology.OVNPath
 			var ovnObservationError error
 			if ovnHost == "" {
-				fmt.Fprintln(
-					writer,
-					"ovn: skipped (set --ovn-host or PF_OVN_HOST)",
-				)
+				if !summaryOnly {
+					fmt.Fprintln(
+						writer,
+						"ovn: skipped (set --ovn-host or PF_OVN_HOST)",
+					)
+				}
 			} else {
 				runner := execx.SystemRunner{
 					SSH: execx.SSHConfig{
@@ -130,21 +133,25 @@ func newPlanCommand() *cobra.Command {
 						"discover OVN path: %w",
 						err,
 					)
-					fmt.Fprintf(
-						writer,
-						"ovn: error: %v\n",
-						ovnObservationError,
-					)
+					if !summaryOnly {
+						fmt.Fprintf(
+							writer,
+							"ovn: error: %v\n",
+							ovnObservationError,
+						)
+					}
 				} else {
 					ovnObservation = &ovnPath
-					if err := report.WriteOVN(
-						writer,
-						ovnPath,
-					); err != nil {
-						return fmt.Errorf(
-							"write OVN report: %w",
-							err,
-						)
+					if !summaryOnly {
+						if err := report.WriteOVN(
+							writer,
+							ovnPath,
+						); err != nil {
+							return fmt.Errorf(
+								"write OVN report: %w",
+								err,
+							)
+						}
 					}
 				}
 			}
@@ -152,7 +159,9 @@ func newPlanCommand() *cobra.Command {
 			var ovsObservation *topology.OVSPath
 			var ovsObservationError error
 			if !enableOVS {
-				fmt.Fprintln(writer, "ovs: skipped (set --ovs)")
+				if !summaryOnly {
+					fmt.Fprintln(writer, "ovs: skipped (set --ovs)")
+				}
 			} else {
 				mappings, err := execx.ParseHostMappings(hostMappings)
 				if err != nil {
@@ -214,18 +223,20 @@ func newPlanCommand() *cobra.Command {
 						)
 					} else {
 						ovsObservation = &ovsPath
-						if err := report.WriteOVS(
-							writer,
-							ovsPath,
-						); err != nil {
-							return fmt.Errorf(
-								"write OVS report: %w",
-								err,
-							)
+						if !summaryOnly {
+							if err := report.WriteOVS(
+								writer,
+								ovsPath,
+							); err != nil {
+								return fmt.Errorf(
+									"write OVS report: %w",
+									err,
+								)
+							}
 						}
 					}
 				}
-				if ovsObservationError != nil {
+				if ovsObservationError != nil && !summaryOnly {
 					fmt.Fprintf(
 						writer,
 						"ovs: error: %v\n",
@@ -246,6 +257,9 @@ func newPlanCommand() *cobra.Command {
 			})
 			if err := report.WriteDiagnosis(writer, diagnosis); err != nil {
 				return fmt.Errorf("write path diagnosis: %w", err)
+			}
+			if failOnBroken && diagnosis.Verdict == diagnose.StatusFail {
+				return fmt.Errorf("packet path verdict is FAIL")
 			}
 			return nil
 		},
@@ -350,6 +364,20 @@ func newPlanCommand() *cobra.Command {
 		"integration-bridge",
 		environmentOrDefault("PF_INTEGRATION_BRIDGE", "br-int"),
 		"OVS integration bridge",
+	)
+
+	command.Flags().BoolVar(
+		&summaryOnly,
+		"summary",
+		false,
+		"show only the diagnosed path graph and findings",
+	)
+
+	command.Flags().BoolVar(
+		&failOnBroken,
+		"fail-on-broken",
+		false,
+		"exit with status 1 when the diagnosed verdict is FAIL",
 	)
 
 	return command

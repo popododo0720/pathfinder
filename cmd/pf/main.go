@@ -9,7 +9,7 @@ import (
 func main() {
 	rootCommand := &cobra.Command{
 		Use:          "pf",
-		Short:        "Trace packet paths through OVN",
+		Short:        "Trace packet paths through OpenStack, OVN, and OVS",
 		SilenceUsage: true,
 	}
 
