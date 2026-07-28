@@ -14,6 +14,7 @@ func main() {
 	}
 
 	rootCommand.AddCommand(newPlanCommand())
+	rootCommand.AddCommand(newTUICommand())
 
 	if err := rootCommand.Execute(); err != nil {
 		os.Exit(1)
