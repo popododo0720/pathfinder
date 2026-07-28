@@ -20,27 +20,35 @@ func newTUICommand() *cobra.Command {
 			return validateConnectionStates(flags.connectionStates)
 		},
 		RunE: func(command *cobra.Command, args []string) error {
-			options, err := flags.options(args)
-			if err != nil {
-				return err
-			}
-			model := pathfindertui.NewModel(
-				command.Context(),
-				options,
-				flags.timeout,
-			)
-			program := tea.NewProgram(
-				model,
-				tea.WithContext(command.Context()),
-				tea.WithAltScreen(),
-			)
-			if _, err := program.Run(); err != nil {
-				return fmt.Errorf("run TUI: %w", err)
-			}
-			return nil
+			return runTUI(command, args, flags)
 		},
 	}
 
 	flags.addTo(command)
 	return command
+}
+
+func runTUI(
+	command *cobra.Command,
+	args []string,
+	flags *analysisFlags,
+) error {
+	options, err := flags.options(args)
+	if err != nil {
+		return err
+	}
+	model := pathfindertui.NewModel(
+		command.Context(),
+		options,
+		flags.timeout,
+	)
+	program := tea.NewProgram(
+		model,
+		tea.WithContext(command.Context()),
+		tea.WithAltScreen(),
+	)
+	if _, err := program.Run(); err != nil {
+		return fmt.Errorf("run TUI: %w", err)
+	}
+	return nil
 }

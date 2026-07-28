@@ -85,10 +85,11 @@ configuration.
 
 ## TUI
 
-The TUI accepts the same discovery options as `plan`:
+The TUI is the default command and accepts the same discovery options as
+`plan`. The explicit `pf tui` form remains available as an alias:
 
 ```sh
-pf tui \
+pf \
   --minimal \
   --ovn-host 192.0.2.11 \
   --ovs \
