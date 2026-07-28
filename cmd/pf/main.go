@@ -8,8 +8,9 @@ import (
 
 func main() {
 	rootCommand := &cobra.Command{
-		Use:   "pf",
-		Short: "Trace packet paths through OVN",
+		Use:          "pf",
+		Short:        "Trace packet paths through OVN",
+		SilenceUsage: true,
 	}
 
 	rootCommand.AddCommand(newPlanCommand())

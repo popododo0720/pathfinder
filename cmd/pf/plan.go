@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"time"
 
 	"pathfinder/internal/cloud"
+	"pathfinder/internal/execx"
+	"pathfinder/internal/ovn"
 	"pathfinder/internal/report"
 
 	"github.com/spf13/cobra"
@@ -12,6 +17,13 @@ import (
 func newPlanCommand() *cobra.Command {
 	var connectionStates []string
 	var minimal bool
+	var timeout time.Duration
+	var ovnHost string
+	var sshUser string
+	var sshPort int
+	var sshKey string
+	var containerEngine string
+	var ovnContainer string
 
 	command := &cobra.Command{
 		Use:   "plan SOURCE DESTINATION [MICROFLOW]",
@@ -32,6 +44,11 @@ func newPlanCommand() *cobra.Command {
 			}
 
 			ctx := command.Context()
+			if timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+			}
 
 			networkClient, err := cloud.NewNetworkClient(ctx)
 			if err != nil {
@@ -55,11 +72,54 @@ func newPlanCommand() *cobra.Command {
 				return fmt.Errorf("write report: %w", err)
 			}
 
-			command.Printf("microflow: %s\n", microflow)
-			command.Printf("minimal: %t\n", minimal)
+			writer := command.OutOrStdout()
+			fmt.Fprintf(writer, "microflow: %s\n", microflow)
+			fmt.Fprintf(writer, "minimal: %t\n", minimal)
 
 			for index, state := range connectionStates {
-				command.Printf("ct[%d]: %s\n", index, state)
+				fmt.Fprintf(
+					writer,
+					"ct[%d]: %s\n",
+					index,
+					state,
+				)
+			}
+
+			if ovnHost == "" {
+				fmt.Fprintln(
+					writer,
+					"ovn: skipped (set --ovn-host or PF_OVN_HOST)",
+				)
+				return nil
+			}
+
+			runner := execx.SystemRunner{
+				SSH: execx.SSHConfig{
+					User:         sshUser,
+					Port:         sshPort,
+					IdentityFile: sshKey,
+				},
+			}
+			ovnClient := ovn.NewClient(
+				runner,
+				ovn.Config{
+					Host:            ovnHost,
+					ContainerEngine: containerEngine,
+					Container:       ovnContainer,
+				},
+			)
+			ovnPath, err := ovnClient.DiscoverPath(
+				ctx,
+				path,
+				microflow,
+				connectionStates,
+				minimal,
+			)
+			if err != nil {
+				return fmt.Errorf("discover OVN path: %w", err)
+			}
+			if err := report.WriteOVN(writer, ovnPath); err != nil {
+				return fmt.Errorf("write OVN report: %w", err)
 			}
 
 			return nil
@@ -80,5 +140,61 @@ func newPlanCommand() *cobra.Command {
 		"show only the minimal packet path",
 	)
 
+	command.Flags().DurationVar(
+		&timeout,
+		"timeout",
+		60*time.Second,
+		"maximum duration for discovery and trace",
+	)
+
+	command.Flags().StringVar(
+		&ovnHost,
+		"ovn-host",
+		os.Getenv("PF_OVN_HOST"),
+		"SSH host running the OVN central container",
+	)
+
+	command.Flags().StringVar(
+		&sshUser,
+		"ssh-user",
+		environmentOrDefault("PF_SSH_USER", "root"),
+		"SSH user for OVN and OVS hosts",
+	)
+
+	command.Flags().IntVar(
+		&sshPort,
+		"ssh-port",
+		22,
+		"SSH port for OVN and OVS hosts",
+	)
+
+	command.Flags().StringVar(
+		&sshKey,
+		"ssh-key",
+		os.Getenv("PF_SSH_KEY"),
+		"SSH private key path",
+	)
+
+	command.Flags().StringVar(
+		&containerEngine,
+		"container-engine",
+		environmentOrDefault("PF_CONTAINER_ENGINE", "docker"),
+		"container engine used by Kolla",
+	)
+
+	command.Flags().StringVar(
+		&ovnContainer,
+		"ovn-container",
+		environmentOrDefault("PF_OVN_CONTAINER", "ovn_northd"),
+		"container containing OVN command-line tools",
+	)
+
 	return command
+}
+
+func environmentOrDefault(name string, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
 }
