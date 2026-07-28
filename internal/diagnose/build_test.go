@@ -59,14 +59,15 @@ func TestBuildLiveProbeVerifiesExternalPhysicalPath(t *testing.T) {
 	path.Destination.Network.PhysicalNetwork = "external"
 	path.Destination.Network.SegmentationID = "55"
 	probe := topology.ProbeResult{
-		Protocol:      "icmp",
-		SourceIP:      "192.168.0.78",
-		DestinationIP: "192.168.55.148",
-		Injected:      true,
-		Delivered:     true,
-		ReplyExpected: true,
-		ReplyObserved: true,
-		Marker:        "icmp-id:42",
+		Protocol:       "icmp",
+		SourceIP:       "192.168.0.78",
+		DestinationIP:  "192.168.55.148",
+		Injected:       true,
+		Delivered:      true,
+		ReplyExpected:  true,
+		ReplyGenerated: true,
+		ReplyObserved:  true,
+		Marker:         "icmp-id:42",
 	}
 	ovsPath := topology.OVSPath{
 		Source: topology.OVSEndpoint{
@@ -245,6 +246,7 @@ func TestBuildReportsDeliveredLiveProbe(t *testing.T) {
 		Injected:        true,
 		Delivered:       true,
 		ReplyExpected:   true,
+		ReplyGenerated:  true,
 		ReplyObserved:   true,
 		Marker:          "tcp:45000->443",
 	}
@@ -268,6 +270,9 @@ func TestBuildReportsDeliveredLiveProbe(t *testing.T) {
 	if !hasHop(result, "return-probe", StatusPass) {
 		t.Fatalf("successful return-probe hop not found: %v", result.Hops)
 	}
+	if !hasHop(result, "reply-generation", StatusPass) {
+		t.Fatalf("reply-generation hop not found: %v", result.Hops)
+	}
 }
 
 func TestBuildFailsWhenExpectedReplyIsNotObserved(t *testing.T) {
@@ -275,12 +280,13 @@ func TestBuildFailsWhenExpectedReplyIsNotObserved(t *testing.T) {
 
 	path := testNeutronPath("network", "network")
 	probe := topology.ProbeResult{
-		Protocol:      "icmp",
-		Injected:      true,
-		Delivered:     true,
-		ReplyExpected: true,
-		ReplyObserved: false,
-		Marker:        "icmp-id:42",
+		Protocol:       "icmp",
+		Injected:       true,
+		Delivered:      true,
+		ReplyExpected:  true,
+		ReplyGenerated: true,
+		ReplyObserved:  false,
+		Marker:         "icmp-id:42",
 	}
 	result := Build(Input{
 		Neutron:        path,

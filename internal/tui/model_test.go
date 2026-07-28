@@ -176,6 +176,7 @@ func testResult() engine.Result {
 			Injected:             true,
 			Delivered:            true,
 			ReplyExpected:        true,
+			ReplyGenerated:       true,
 			ReplyObserved:        true,
 			Marker:               "tcp:45000->443",
 			RequestFilter:        "tcp dst port 443",

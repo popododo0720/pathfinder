@@ -181,6 +181,21 @@ func Build(input Input) Report {
 			probeStatus,
 		)
 		if input.Probe != nil && input.Probe.ReplyExpected {
+			generatedStatus, generatedDetail := generatedReply(
+				input.Probe,
+			)
+			builder.addHop(Hop{
+				ID:     "reply-generation",
+				Label:  "destination reply generation",
+				Status: generatedStatus,
+				Detail: generatedDetail,
+			})
+			builder.addLink(
+				"live-probe",
+				"reply-generation",
+				"guest reply",
+				generatedStatus,
+			)
 			replyStatus, replyDetail := observedReply(input.Probe)
 			builder.addHop(Hop{
 				ID:     "return-probe",
@@ -189,7 +204,7 @@ func Build(input Input) Report {
 				Detail: replyDetail,
 			})
 			builder.addLink(
-				"live-probe",
+				"reply-generation",
 				"return-probe",
 				"reply verification",
 				replyStatus,
@@ -232,12 +247,27 @@ func observedProbe(
 	)
 }
 
+func generatedReply(probe *topology.ProbeResult) (Status, string) {
+	if probe.ReplyGenerated {
+		return StatusPass,
+			"matching reply observed leaving the destination tap"
+	}
+	return StatusFail,
+		"request reached the destination tap, but no matching reply " +
+			"left the guest"
+}
+
 func observedReply(probe *topology.ProbeResult) (Status, string) {
 	if probe.ReplyObserved {
 		return StatusPass, fmt.Sprintf(
 			"reply observed on source tap; filter=%s",
 			probe.ReplyFilter,
 		)
+	}
+	if !probe.ReplyGenerated {
+		return StatusUnknown,
+			"return path was not tested because the destination " +
+				"did not generate a matching reply"
 	}
 	return StatusFail,
 		"forward packet arrived, but no matching reply was observed " +

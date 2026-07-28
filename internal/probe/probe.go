@@ -98,11 +98,19 @@ func Run(
 		deliveryTimeout,
 	)
 	var replyCapture <-chan captureOutcome
+	var replyGeneratedCapture <-chan captureOutcome
 	if result.ReplyExpected {
 		replyCapture = startCapture(
 			captureContext,
 			sourceClient,
 			ovsPath.Source.Interface,
+			result.ReplyFilter,
+			deliveryTimeout,
+		)
+		replyGeneratedCapture = startCapture(
+			captureContext,
+			destinationClient,
+			ovsPath.Destination.Interface,
 			result.ReplyFilter,
 			deliveryTimeout,
 		)
@@ -137,6 +145,20 @@ func Run(
 	result.RequestCapture = request.Output
 
 	if replyCapture != nil {
+		generatedReply, err := awaitCapture(
+			ctx,
+			replyGeneratedCapture,
+		)
+		if err != nil {
+			result.Duration = time.Since(started)
+			return result, fmt.Errorf(
+				"observe reply leaving destination: %w",
+				err,
+			)
+		}
+		result.ReplyGenerated = !generatedReply.TimedOut
+		result.ReplyGeneratedCapture = generatedReply.Output
+
 		reply, err := awaitCapture(ctx, replyCapture)
 		if err != nil {
 			result.Duration = time.Since(started)
