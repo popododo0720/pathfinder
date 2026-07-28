@@ -22,7 +22,9 @@ type Options struct {
 	ConnectionStates  []string
 	Minimal           bool
 	PlanOnly          bool
+	Observe           bool
 	ProbeTimeout      time.Duration
+	ObserveTimeout    time.Duration
 
 	OVNHost           string
 	EnableOVS         bool
@@ -188,15 +190,28 @@ func analyzeProbe(
 		result.duration = time.Since(started)
 		return result
 	}
-	probeResult, err := probe.Run(
-		ctx,
-		sourceClient,
-		destinationClient,
-		path,
-		*ovsPath,
-		options.Microflow,
-		options.ProbeTimeout,
-	)
+	var probeResult topology.ProbeResult
+	if options.Observe {
+		probeResult, err = probe.Observe(
+			ctx,
+			sourceClient,
+			destinationClient,
+			path,
+			*ovsPath,
+			options.Microflow,
+			options.ObserveTimeout,
+		)
+	} else {
+		probeResult, err = probe.Run(
+			ctx,
+			sourceClient,
+			destinationClient,
+			path,
+			*ovsPath,
+			options.Microflow,
+			options.ProbeTimeout,
+		)
+	}
 	result.duration = time.Since(started)
 	if err != nil {
 		result.err = fmt.Errorf("run live probe: %w", err)

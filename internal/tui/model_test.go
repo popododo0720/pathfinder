@@ -65,7 +65,7 @@ func TestModelSwitchesToTraceTabs(t *testing.T) {
 	}
 
 	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
-	if !strings.Contains(model.View(), "LIVE PROBE: DELIVERED") {
+	if !strings.Contains(model.View(), "LIVE: DELIVERED") {
 		t.Fatalf("probe result is missing:\n%s", model.View())
 	}
 }
@@ -89,6 +89,31 @@ func TestPlanModeShowsThatNoPacketWasInjected(t *testing.T) {
 	if !strings.Contains(view, "PLAN") ||
 		!strings.Contains(view, "No packet was injected") {
 		t.Fatalf("plan mode is not clear:\n%s", view)
+	}
+}
+
+func TestObserveModeShowsObservedTraffic(t *testing.T) {
+	t.Parallel()
+
+	model := testModelWithOptions(engine.Options{
+		SourcePortID:      "source",
+		DestinationPortID: "destination",
+		Observe:           true,
+	})
+	result := testResult()
+	result.Probe.Mode = "observe"
+	result.Probe.Injected = false
+	model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	model.Update(analysisFinishedMsg{
+		generation: model.generation,
+		result:     result,
+	})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+
+	view := model.View()
+	if !strings.Contains(view, "OBSERVE") ||
+		!strings.Contains(view, "Source observed: true") {
+		t.Fatalf("observe mode is not clear:\n%s", view)
 	}
 }
 
@@ -174,6 +199,7 @@ func testResult() engine.Result {
 			SourceMAC:            "fa:16:3e:00:00:01",
 			DestinationMAC:       "fa:16:3e:00:00:02",
 			Injected:             true,
+			SourceObserved:       true,
 			Delivered:            true,
 			ReplyExpected:        true,
 			ReplyGenerated:       true,

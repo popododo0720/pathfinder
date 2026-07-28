@@ -16,6 +16,8 @@ func (model Model) loadingView() string {
 	activity := "Running live packet analysis..."
 	if model.options.PlanOnly {
 		activity = "Building packet path plan..."
+	} else if model.options.Observe {
+		activity = "Waiting for matching existing traffic..."
 	}
 	body := fmt.Sprintf(
 		"%s\n\n%s %s\n\n%s\n%s\n\nElapsed: %s",
@@ -90,6 +92,8 @@ func (model Model) headerView() string {
 	mode := "LIVE"
 	if model.options.PlanOnly {
 		mode = "PLAN"
+	} else if model.options.Observe {
+		mode = "OBSERVE"
 	}
 	return lipgloss.JoinHorizontal(
 		lipgloss.Center,
@@ -359,6 +363,10 @@ func (model Model) probeContent() string {
 		return "LIVE PROBE\n\nNo result"
 	}
 	probe := model.result.Probe
+	mode := "LIVE"
+	if probe.Mode == "observe" {
+		mode = "OBSERVE"
+	}
 	status := "NOT DELIVERED"
 	if probe.Delivered {
 		status = "DELIVERED"
@@ -383,7 +391,8 @@ func (model Model) probeContent() string {
 		)
 	}
 	return fmt.Sprintf(
-		"LIVE PROBE: %s\n\nMethod: %s\nMarker: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nNext hop: %s\nInjected: %t\nExact destination capture: %t\nReply: %s\nDuration: %s\n\nRequest filter:\n%s\n\nReply filter:\n%s\n\n%s",
+		"%s: %s\n\nMethod: %s\nMarker: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nNext hop: %s\nInjected: %t\nSource observed: %t\nExact destination capture: %t\nReply: %s\nDuration: %s\n\nRequest filter:\n%s\n\nReply filter:\n%s\n\n%s",
+		mode,
 		status,
 		probe.Method,
 		probe.Marker,
@@ -396,6 +405,7 @@ func (model Model) probeContent() string {
 		probe.DestinationMAC,
 		nextHop,
 		probe.Injected,
+		probe.SourceObserved,
 		probe.Delivered,
 		reply,
 		shortDuration(probe.Duration),

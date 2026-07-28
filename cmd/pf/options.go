@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -15,7 +16,9 @@ type analysisFlags struct {
 	connectionStates  []string
 	minimal           bool
 	planOnly          bool
+	observe           bool
 	probeTimeout      time.Duration
+	observeTimeout    time.Duration
 	timeout           time.Duration
 	ovnHost           string
 	sshUser           string
@@ -49,11 +52,23 @@ func (flags *analysisFlags) addTo(command *cobra.Command) {
 		false,
 		"simulate and inspect the path without sending a packet",
 	)
+	command.Flags().BoolVar(
+		&flags.observe,
+		"observe",
+		false,
+		"observe matching existing traffic without injecting a packet",
+	)
 	command.Flags().DurationVar(
 		&flags.probeTimeout,
 		"probe-timeout",
 		time.Second,
 		"maximum time to observe delivery after packet injection",
+	)
+	command.Flags().DurationVar(
+		&flags.observeTimeout,
+		"observe-timeout",
+		10*time.Second,
+		"maximum time to wait for matching existing traffic",
 	)
 	command.Flags().DurationVar(
 		&flags.timeout,
@@ -107,7 +122,7 @@ func (flags *analysisFlags) addTo(command *cobra.Command) {
 		&flags.enableOVS,
 		"ovs",
 		true,
-		"inspect OVS and enable live packet injection",
+		"inspect OVS and support live/observe modes",
 	)
 	command.Flags().StringArrayVar(
 		&flags.hostMappings,
@@ -152,7 +167,9 @@ func (flags *analysisFlags) options(
 		ConnectionStates:  flags.connectionStates,
 		Minimal:           flags.minimal,
 		PlanOnly:          flags.planOnly,
+		Observe:           flags.observe,
 		ProbeTimeout:      flags.probeTimeout,
+		ObserveTimeout:    flags.observeTimeout,
 		OVNHost:           flags.ovnHost,
 		EnableOVS:         flags.enableOVS,
 		HostMappings:      mappings,
@@ -168,6 +185,16 @@ func (flags *analysisFlags) options(
 			StrictHostKey: flags.sshStrictHostKey,
 		},
 	}, nil
+}
+
+func (flags *analysisFlags) validate() error {
+	if flags.planOnly && flags.observe {
+		return fmt.Errorf("--plan and --observe cannot be used together")
+	}
+	if flags.observe && !flags.enableOVS {
+		return fmt.Errorf("--observe requires --ovs")
+	}
+	return validateConnectionStates(flags.connectionStates)
 }
 
 func (flags *analysisFlags) context(

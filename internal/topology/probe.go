@@ -23,6 +23,7 @@ type ProbeResult struct {
 	ReplyObserved         bool
 	RequestFilter         string
 	ReplyFilter           string
+	SourceCapture         string
 	RequestCapture        string
 	ReplyGeneratedCapture string
 	ReplyCapture          string

@@ -20,7 +20,7 @@ func newRootCommand() *cobra.Command {
 		SilenceUsage: true,
 		Args:         cobra.RangeArgs(2, 3),
 		PreRunE: func(_ *cobra.Command, _ []string) error {
-			return validateConnectionStates(flags.connectionStates)
+			return flags.validate()
 		},
 		RunE: func(command *cobra.Command, args []string) error {
 			return runTUI(command, args, flags)

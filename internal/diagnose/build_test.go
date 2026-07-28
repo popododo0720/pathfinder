@@ -302,6 +302,37 @@ func TestBuildFailsWhenExpectedReplyIsNotObserved(t *testing.T) {
 	}
 }
 
+func TestBuildPassesCorrelatedObservedTraffic(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	probe := topology.ProbeResult{
+		Mode:           "observe",
+		Protocol:       "icmp",
+		SourceIP:       "10.0.0.10",
+		DestinationIP:  "10.0.0.20",
+		SourceObserved: true,
+		Delivered:      true,
+		Marker:         "ipv4-id:42",
+	}
+	result := Build(Input{
+		Neutron:        path,
+		Probe:          &probe,
+		ProbeRequested: true,
+	})
+
+	if result.Verdict != StatusPass {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	if !hasHop(result, "live-probe", StatusPass) {
+		t.Fatalf("observed traffic hop not found: %v", result.Hops)
+	}
+}
+
 func TestBuildFailsWhenLiveProbeIsNotDelivered(t *testing.T) {
 	t.Parallel()
 

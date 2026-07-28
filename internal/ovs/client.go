@@ -242,6 +242,7 @@ func (client *Client) CapturePacket(
 		"-i",
 		interfaceName,
 		"-nne",
+		"-vv",
 		"-l",
 		"-c",
 		"1",

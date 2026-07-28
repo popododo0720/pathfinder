@@ -59,6 +59,28 @@ func TestAnalysisFlagsEnablePlanMode(t *testing.T) {
 	}
 }
 
+func TestAnalysisFlagsEnableObserveMode(t *testing.T) {
+	t.Parallel()
+
+	options := testAnalysisOptions(t, []string{"--observe"})
+	if !options.Observe || options.PlanOnly {
+		t.Fatalf("options = %+v", options)
+	}
+}
+
+func TestAnalysisFlagsRejectPlanAndObserveTogether(t *testing.T) {
+	t.Parallel()
+
+	flags := &analysisFlags{
+		planOnly:  true,
+		observe:   true,
+		enableOVS: true,
+	}
+	if err := flags.validate(); err == nil {
+		t.Fatal("--plan and --observe were accepted together")
+	}
+}
+
 func testAnalysisOptions(
 	t *testing.T,
 	flagArgs []string,

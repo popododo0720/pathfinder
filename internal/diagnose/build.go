@@ -168,9 +168,13 @@ func Build(input Input) Report {
 			input.Probe,
 			input.ProbeError,
 		)
+		probeLabel := "live packet delivery"
+		if input.Probe != nil && input.Probe.Mode == "observe" {
+			probeLabel = "observed traffic delivery"
+		}
 		builder.addHop(Hop{
 			ID:     "live-probe",
-			Label:  "live packet delivery",
+			Label:  probeLabel,
 			Status: probeStatus,
 			Detail: probeDetail,
 		})
@@ -228,13 +232,31 @@ func observedProbe(
 	if probe == nil {
 		return StatusUnknown, "live probe did not return a result"
 	}
-	if !probe.Injected {
+	if probe.Mode == "observe" && !probe.SourceObserved {
+		return StatusFail,
+			"no matching traffic was observed on the source tap"
+	}
+	if probe.Mode != "observe" && !probe.Injected {
 		return StatusFail, "packet was not injected"
 	}
 	if !probe.Delivered {
+		if probe.Mode == "observe" {
+			return StatusFail,
+				"matching traffic was observed at the source but not " +
+					"correlated at the destination"
+		}
 		return StatusFail,
 			"packet injected but its exact marker was not observed " +
 				"on the destination tap"
+	}
+	if probe.Mode == "observe" {
+		return StatusPass, fmt.Sprintf(
+			"%s traffic %s -> %s observed at both taps; marker=%s",
+			probe.Protocol,
+			probe.SourceIP,
+			probe.DestinationIP,
+			probe.Marker,
+		)
 	}
 	return StatusPass, fmt.Sprintf(
 		"%s %s:%d -> %s:%d delivered; exact marker=%s",
