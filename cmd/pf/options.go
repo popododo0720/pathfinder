@@ -14,6 +14,8 @@ import (
 type analysisFlags struct {
 	connectionStates  []string
 	minimal           bool
+	planOnly          bool
+	probeTimeout      time.Duration
 	timeout           time.Duration
 	ovnHost           string
 	sshUser           string
@@ -40,6 +42,18 @@ func (flags *analysisFlags) addTo(command *cobra.Command) {
 		"minimal",
 		false,
 		"show only the minimal packet path",
+	)
+	command.Flags().BoolVar(
+		&flags.planOnly,
+		"plan",
+		false,
+		"simulate and inspect the path without sending a packet",
+	)
+	command.Flags().DurationVar(
+		&flags.probeTimeout,
+		"probe-timeout",
+		time.Second,
+		"maximum time to observe delivery after packet injection",
 	)
 	command.Flags().DurationVar(
 		&flags.timeout,
@@ -92,8 +106,8 @@ func (flags *analysisFlags) addTo(command *cobra.Command) {
 	command.Flags().BoolVar(
 		&flags.enableOVS,
 		"ovs",
-		false,
-		"inspect OVS bindings and run source-host ofproto/trace",
+		true,
+		"inspect OVS and enable live packet injection",
 	)
 	command.Flags().StringArrayVar(
 		&flags.hostMappings,
@@ -137,6 +151,8 @@ func (flags *analysisFlags) options(
 		Microflow:         microflow,
 		ConnectionStates:  flags.connectionStates,
 		Minimal:           flags.minimal,
+		PlanOnly:          flags.planOnly,
+		ProbeTimeout:      flags.probeTimeout,
 		OVNHost:           flags.ovnHost,
 		EnableOVS:         flags.enableOVS,
 		HostMappings:      mappings,

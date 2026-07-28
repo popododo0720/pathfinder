@@ -63,6 +63,33 @@ func TestModelSwitchesToTraceTabs(t *testing.T) {
 	if !strings.Contains(model.View(), "ovs trace output") {
 		t.Fatalf("OVS trace is missing:\n%s", model.View())
 	}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	if !strings.Contains(model.View(), "LIVE PROBE: DELIVERED") {
+		t.Fatalf("probe result is missing:\n%s", model.View())
+	}
+}
+
+func TestPlanModeShowsThatNoPacketWasInjected(t *testing.T) {
+	t.Parallel()
+
+	model := testModelWithOptions(engine.Options{
+		SourcePortID:      "source",
+		DestinationPortID: "destination",
+		PlanOnly:          true,
+	})
+	model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	model.Update(analysisFinishedMsg{
+		generation: model.generation,
+		result:     testResult(),
+	})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+
+	view := model.View()
+	if !strings.Contains(view, "PLAN") ||
+		!strings.Contains(view, "No packet was injected") {
+		t.Fatalf("plan mode is not clear:\n%s", view)
+	}
 }
 
 func TestStaleAnalysisResultIsIgnored(t *testing.T) {
@@ -104,12 +131,16 @@ func TestCompactViewFitsStandardTerminal(t *testing.T) {
 }
 
 func testModel() *Model {
+	return testModelWithOptions(engine.Options{
+		SourcePortID:      "source",
+		DestinationPortID: "destination",
+	})
+}
+
+func testModelWithOptions(options engine.Options) *Model {
 	return NewModelWithAnalyzer(
 		context.Background(),
-		engine.Options{
-			SourcePortID:      "source",
-			DestinationPortID: "destination",
-		},
+		options,
 		time.Second,
 		func(
 			context.Context,
@@ -131,6 +162,24 @@ func testResult() engine.Result {
 		OVS: &topology.OVSPath{
 			Flow:  "tcp,tp_dst=443",
 			Trace: "ovs trace output",
+		},
+		ProbeRequested: true,
+		Probe: &topology.ProbeResult{
+			Method:               "ovs packet-out",
+			Protocol:             "tcp",
+			SourceIP:             "192.0.2.10",
+			DestinationIP:        "192.0.2.20",
+			SourcePort:           45000,
+			DestinationPort:      443,
+			SourceMAC:            "fa:16:3e:00:00:01",
+			DestinationMAC:       "fa:16:3e:00:00:02",
+			DestinationTXBefore:  10,
+			DestinationTXAfter:   11,
+			DestinationTXDelta:   1,
+			Injected:             true,
+			Delivered:            true,
+			Duration:             100 * time.Millisecond,
+			DetectionDescription: "destination tx_packets increased",
 		},
 		Diagnosis: diagnose.Report{
 			Verdict: diagnose.StatusWarning,
@@ -180,6 +229,7 @@ func testResult() engine.Result {
 			Neutron: 100 * time.Millisecond,
 			OVN:     200 * time.Millisecond,
 			OVS:     300 * time.Millisecond,
+			Probe:   100 * time.Millisecond,
 			Total:   400 * time.Millisecond,
 		},
 	}

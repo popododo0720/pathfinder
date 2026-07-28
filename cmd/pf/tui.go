@@ -9,25 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newTUICommand() *cobra.Command {
-	flags := &analysisFlags{}
-
-	command := &cobra.Command{
-		Use:   "tui SOURCE DESTINATION [MICROFLOW]",
-		Short: "Explore an OpenStack packet path interactively",
-		Args:  cobra.RangeArgs(2, 3),
-		PreRunE: func(_ *cobra.Command, _ []string) error {
-			return validateConnectionStates(flags.connectionStates)
-		},
-		RunE: func(command *cobra.Command, args []string) error {
-			return runTUI(command, args, flags)
-		},
-	}
-
-	flags.addTo(command)
-	return command
-}
-
 func runTUI(
 	command *cobra.Command,
 	args []string,

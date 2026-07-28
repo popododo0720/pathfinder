@@ -22,6 +22,7 @@ const (
 	pathTab tab = iota
 	ovnTab
 	ovsTab
+	probeTab
 	tabCount
 )
 
@@ -184,6 +185,10 @@ func (model *Model) handleKey(
 		return model, nil
 	case "3":
 		model.tab = ovsTab
+		model.refreshViewport()
+		return model, nil
+	case "4":
+		model.tab = probeTab
 		model.refreshViewport()
 		return model, nil
 	case "j", "down":

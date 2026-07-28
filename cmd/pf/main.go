@@ -28,7 +28,5 @@ func newRootCommand() *cobra.Command {
 	}
 
 	flags.addTo(rootCommand)
-	rootCommand.AddCommand(newPlanCommand())
-	rootCommand.AddCommand(newTUICommand())
 	return rootCommand
 }

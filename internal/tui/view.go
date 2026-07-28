@@ -13,10 +13,15 @@ import (
 
 func (model Model) loadingView() string {
 	elapsed := time.Since(model.started).Round(100 * time.Millisecond)
+	activity := "Running live packet analysis..."
+	if model.options.PlanOnly {
+		activity = "Building packet path plan..."
+	}
 	body := fmt.Sprintf(
-		"%s\n\n%s Analyzing Neutron, OVN, and OVS...\n\n%s\n%s\n\nElapsed: %s",
+		"%s\n\n%s %s\n\n%s\n%s\n\nElapsed: %s",
 		titleStyle.Render("PATHFINDER"),
 		model.spinner.View(),
+		activity,
 		subtitleStyle.Render("source      "+model.options.SourcePortID),
 		subtitleStyle.Render("destination "+model.options.DestinationPortID),
 		elapsed,
@@ -49,7 +54,7 @@ func (model Model) readyView() string {
 	}
 
 	help := helpStyle.Render(
-		"1/2/3 or h/l: tabs  •  j/k: select/scroll  •  g/G: top/bottom  •  r: rerun  •  q: quit",
+		"1/2/3/4 or h/l: tabs  •  j/k: select/scroll  •  g/G: top/bottom  •  r: rerun  •  q: quit",
 	)
 	body := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -70,16 +75,27 @@ func (model Model) headerView() string {
 	if model.result != nil {
 		verdict = model.result.Diagnosis.Verdict
 		timing = fmt.Sprintf(
-			"Neutron %s  OVN %s  OVS %s  Total %s",
+			"N %s  OVN %s  OVS %s  Probe %s  Total %s",
 			shortDuration(model.result.Timings.Neutron),
 			shortDuration(model.result.Timings.OVN),
 			shortDuration(model.result.Timings.OVS),
+			shortDuration(model.result.Timings.Probe),
 			shortDuration(model.result.Timings.Total),
 		)
+		if model.width < 110 {
+			timing = "Total " +
+				shortDuration(model.result.Timings.Total)
+		}
+	}
+	mode := "LIVE"
+	if model.options.PlanOnly {
+		mode = "PLAN"
 	}
 	return lipgloss.JoinHorizontal(
 		lipgloss.Center,
 		titleStyle.Render("PATHFINDER"),
+		"  ",
+		activeTabStyle.Render(mode),
 		"  ",
 		statusStyle(verdict).Render("["+string(verdict)+"]"),
 		"  ",
@@ -88,7 +104,12 @@ func (model Model) headerView() string {
 }
 
 func (model Model) tabsView() string {
-	labels := []string{"1 Path", "2 OVN Trace", "3 OVS Trace"}
+	labels := []string{
+		"1 Path",
+		"2 OVN Trace",
+		"3 OVS Trace",
+		"4 Probe",
+	}
 	rendered := make([]string, len(labels))
 	for index, label := range labels {
 		style := tabStyle
@@ -317,9 +338,49 @@ func (model Model) traceContent() string {
 				model.result.OVS.Trace,
 			)
 		}
+	case probeTab:
+		return model.probeContent()
 	default:
 		return ""
 	}
+}
+
+func (model Model) probeContent() string {
+	if model.options.PlanOnly {
+		return "PLAN MODE\n\nNo packet was injected."
+	}
+	if model.result == nil {
+		return "No probe result"
+	}
+	if model.result.ProbeError != nil {
+		return "LIVE PROBE ERROR\n\n" + model.result.ProbeError.Error()
+	}
+	if model.result.Probe == nil {
+		return "LIVE PROBE\n\nNo result"
+	}
+	probe := model.result.Probe
+	status := "NOT DELIVERED"
+	if probe.Delivered {
+		status = "DELIVERED"
+	}
+	return fmt.Sprintf(
+		"LIVE PROBE: %s\n\nMethod: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nInjected: %t\nDestination tx_packets: %d -> %d (delta %d)\nDuration: %s\n\n%s",
+		status,
+		probe.Method,
+		probe.Protocol,
+		probe.SourceIP,
+		probe.SourcePort,
+		probe.SourceMAC,
+		probe.DestinationIP,
+		probe.DestinationPort,
+		probe.DestinationMAC,
+		probe.Injected,
+		probe.DestinationTXBefore,
+		probe.DestinationTXAfter,
+		probe.DestinationTXDelta,
+		shortDuration(probe.Duration),
+		probe.DetectionDescription,
+	)
 }
 
 func shortDuration(duration time.Duration) string {
