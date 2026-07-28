@@ -126,6 +126,7 @@ func (client *Client) GetEndpoint(
 	if err != nil {
 		return topology.OVNEndpoint{}, err
 	}
+	logicalSwitch = referenceDisplayName(logicalSwitch)
 
 	portBindingUUID, err := client.sbctl(
 		ctx,
@@ -304,4 +305,17 @@ func firstLine(value string) string {
 		return value[:index]
 	}
 	return value
+}
+
+func referenceDisplayName(value string) string {
+	value = cleanOVSValue(value)
+	open := strings.Index(value, "(")
+	if open < 0 || !strings.HasSuffix(value, ")") {
+		return value
+	}
+	name := strings.TrimSpace(value[open+1 : len(value)-1])
+	if name == "" {
+		return strings.TrimSpace(value[:open])
+	}
+	return name
 }

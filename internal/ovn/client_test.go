@@ -41,7 +41,7 @@ func TestGetEndpoint(t *testing.T) {
 	runner := &fakeRunner{
 		responses: map[string]string{
 			"ovn-nbctl --if-exists get Logical_Switch_Port port-id _uuid":                           "lsp-uuid\n",
-			"ovn-nbctl lsp-get-ls port-id":                                                          "neutron-network\n",
+			"ovn-nbctl lsp-get-ls port-id":                                                          "switch-uuid (neutron-network)\n",
 			"ovn-sbctl --bare --no-headings --columns=_uuid find Port_Binding logical_port=port-id": "binding-uuid\n",
 			"ovn-sbctl --if-exists get Port_Binding binding-uuid datapath":                          "datapath-uuid\n",
 			"ovn-sbctl --if-exists get Port_Binding binding-uuid chassis":                           "chassis-uuid\n",

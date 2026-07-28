@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -27,6 +28,8 @@ type SSHConfig struct {
 	User           string
 	Port           int
 	IdentityFile   string
+	Password       string
+	StrictHostKey  bool
 	ConnectTimeout int
 }
 
@@ -78,9 +81,19 @@ func (runner SystemRunner) Run(
 	if host != "" && host != "local" {
 		commandName = "ssh"
 		commandArgs = runner.sshArgs(host, name, args)
+		if runner.SSH.Password != "" {
+			commandName = "sshpass"
+			commandArgs = append([]string{"-e", "ssh"}, commandArgs...)
+		}
 	}
 
 	command := exec.CommandContext(ctx, commandName, commandArgs...)
+	if runner.SSH.Password != "" {
+		command.Env = append(
+			os.Environ(),
+			"SSHPASS="+runner.SSH.Password,
+		)
+	}
 	var stdout strings.Builder
 	var stderr strings.Builder
 	command.Stdout = &stdout
@@ -121,8 +134,26 @@ func (runner SystemRunner) sshArgs(
 	}
 
 	sshArgs := []string{
-		"-o", "BatchMode=yes",
 		"-o", "ConnectTimeout=" + strconv.Itoa(timeout),
+		"-o", "LogLevel=ERROR",
+	}
+	if runner.SSH.Password == "" {
+		sshArgs = append(sshArgs, "-o", "BatchMode=yes")
+	}
+	if runner.SSH.StrictHostKey {
+		sshArgs = append(
+			sshArgs,
+			"-o",
+			"StrictHostKeyChecking=yes",
+		)
+	} else {
+		sshArgs = append(
+			sshArgs,
+			"-o",
+			"StrictHostKeyChecking=no",
+			"-o",
+			"UserKnownHostsFile=/dev/null",
+		)
 	}
 	if runner.SSH.Port > 0 && runner.SSH.Port != 22 {
 		sshArgs = append(

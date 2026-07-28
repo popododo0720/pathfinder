@@ -9,6 +9,7 @@ import (
 	"pathfinder/internal/cloud"
 	"pathfinder/internal/execx"
 	"pathfinder/internal/ovn"
+	"pathfinder/internal/ovs"
 	"pathfinder/internal/report"
 
 	"github.com/spf13/cobra"
@@ -22,8 +23,13 @@ func newPlanCommand() *cobra.Command {
 	var sshUser string
 	var sshPort int
 	var sshKey string
+	var sshStrictHostKey bool
 	var containerEngine string
 	var ovnContainer string
+	var enableOVS bool
+	var hostMappings []string
+	var ovsContainer string
+	var integrationBridge string
 
 	command := &cobra.Command{
 		Use:   "plan SOURCE DESTINATION [MICROFLOW]",
@@ -90,36 +96,101 @@ func newPlanCommand() *cobra.Command {
 					writer,
 					"ovn: skipped (set --ovn-host or PF_OVN_HOST)",
 				)
+			} else {
+				runner := execx.SystemRunner{
+					SSH: execx.SSHConfig{
+						User:          sshUser,
+						Port:          sshPort,
+						IdentityFile:  sshKey,
+						Password:      os.Getenv("PF_SSH_PASSWORD"),
+						StrictHostKey: sshStrictHostKey,
+					},
+				}
+				ovnClient := ovn.NewClient(
+					runner,
+					ovn.Config{
+						Host:            ovnHost,
+						ContainerEngine: containerEngine,
+						Container:       ovnContainer,
+					},
+				)
+				ovnPath, err := ovnClient.DiscoverPath(
+					ctx,
+					path,
+					microflow,
+					connectionStates,
+					minimal,
+				)
+				if err != nil {
+					return fmt.Errorf("discover OVN path: %w", err)
+				}
+				if err := report.WriteOVN(writer, ovnPath); err != nil {
+					return fmt.Errorf("write OVN report: %w", err)
+				}
+			}
+
+			if !enableOVS {
+				fmt.Fprintln(writer, "ovs: skipped (set --ovs)")
 				return nil
+			}
+
+			mappings, err := execx.ParseHostMappings(hostMappings)
+			if err != nil {
+				return err
+			}
+			sourceHost := execx.ResolveHost(
+				path.Source.Endpoint.HostID,
+				mappings,
+			)
+			destinationHost := execx.ResolveHost(
+				path.Destination.Endpoint.HostID,
+				mappings,
+			)
+			if sourceHost == "" || destinationHost == "" {
+				return fmt.Errorf(
+					"OVS trace requires both Neutron ports to have a host binding",
+				)
 			}
 
 			runner := execx.SystemRunner{
 				SSH: execx.SSHConfig{
-					User:         sshUser,
-					Port:         sshPort,
-					IdentityFile: sshKey,
+					User:          sshUser,
+					Port:          sshPort,
+					IdentityFile:  sshKey,
+					Password:      os.Getenv("PF_SSH_PASSWORD"),
+					StrictHostKey: sshStrictHostKey,
 				},
 			}
-			ovnClient := ovn.NewClient(
+			sourceOVSClient := ovs.NewClient(
 				runner,
-				ovn.Config{
-					Host:            ovnHost,
+				ovs.Config{
+					Host:            sourceHost,
 					ContainerEngine: containerEngine,
-					Container:       ovnContainer,
+					Container:       ovsContainer,
+					Bridge:          integrationBridge,
 				},
 			)
-			ovnPath, err := ovnClient.DiscoverPath(
+			destinationOVSClient := ovs.NewClient(
+				runner,
+				ovs.Config{
+					Host:            destinationHost,
+					ContainerEngine: containerEngine,
+					Container:       ovsContainer,
+					Bridge:          integrationBridge,
+				},
+			)
+			ovsPath, err := ovs.DiscoverPath(
 				ctx,
+				sourceOVSClient,
+				destinationOVSClient,
 				path,
 				microflow,
-				connectionStates,
-				minimal,
 			)
 			if err != nil {
-				return fmt.Errorf("discover OVN path: %w", err)
+				return fmt.Errorf("discover OVS path: %w", err)
 			}
-			if err := report.WriteOVN(writer, ovnPath); err != nil {
-				return fmt.Errorf("write OVN report: %w", err)
+			if err := report.WriteOVS(writer, ovsPath); err != nil {
+				return fmt.Errorf("write OVS report: %w", err)
 			}
 
 			return nil
@@ -175,6 +246,13 @@ func newPlanCommand() *cobra.Command {
 		"SSH private key path",
 	)
 
+	command.Flags().BoolVar(
+		&sshStrictHostKey,
+		"ssh-strict-host-key",
+		false,
+		"require SSH host keys to match known_hosts",
+	)
+
 	command.Flags().StringVar(
 		&containerEngine,
 		"container-engine",
@@ -187,6 +265,37 @@ func newPlanCommand() *cobra.Command {
 		"ovn-container",
 		environmentOrDefault("PF_OVN_CONTAINER", "ovn_northd"),
 		"container containing OVN command-line tools",
+	)
+
+	command.Flags().BoolVar(
+		&enableOVS,
+		"ovs",
+		false,
+		"inspect OVS bindings and run source-host ofproto/trace",
+	)
+
+	command.Flags().StringArrayVar(
+		&hostMappings,
+		"host-map",
+		nil,
+		"map a Neutron host to an SSH address (NAME=ADDRESS)",
+	)
+
+	command.Flags().StringVar(
+		&ovsContainer,
+		"ovs-container",
+		environmentOrDefault(
+			"PF_OVS_CONTAINER",
+			"openvswitch_vswitchd",
+		),
+		"container containing OVS command-line tools",
+	)
+
+	command.Flags().StringVar(
+		&integrationBridge,
+		"integration-bridge",
+		environmentOrDefault("PF_INTEGRATION_BRIDGE", "br-int"),
+		"OVS integration bridge",
 	)
 
 	return command
