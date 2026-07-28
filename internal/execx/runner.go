@@ -30,6 +30,8 @@ type SSHConfig struct {
 	IdentityFile   string
 	Password       string
 	StrictHostKey  bool
+	DisableControl bool
+	ControlPath    string
 	ConnectTimeout int
 }
 
@@ -139,6 +141,19 @@ func (runner SystemRunner) sshArgs(
 	}
 	if runner.SSH.Password == "" {
 		sshArgs = append(sshArgs, "-o", "BatchMode=yes")
+	}
+	if !runner.SSH.DisableControl {
+		controlPath := runner.SSH.ControlPath
+		if controlPath == "" {
+			controlPath = "/tmp/pathfinder-ssh-%C"
+		}
+		sshArgs = append(
+			sshArgs,
+			"-o", "ControlMaster=auto",
+			"-o", "ControlPersist=60s",
+			"-o", "ControlPath="+controlPath,
+			"-o", "StreamLocalBindUnlink=yes",
+		)
 	}
 	if runner.SSH.StrictHostKey {
 		sshArgs = append(

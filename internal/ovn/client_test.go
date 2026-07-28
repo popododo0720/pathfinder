@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"pathfinder/internal/execx"
@@ -12,6 +13,7 @@ import (
 type fakeRunner struct {
 	responses map[string]string
 	commands  []string
+	mu        sync.Mutex
 }
 
 func (runner *fakeRunner) Run(
@@ -21,7 +23,9 @@ func (runner *fakeRunner) Run(
 	args ...string,
 ) (execx.Result, error) {
 	command := host + "|" + name + "|" + strings.Join(args, " ")
+	runner.mu.Lock()
 	runner.commands = append(runner.commands, command)
+	runner.mu.Unlock()
 
 	for match, response := range runner.responses {
 		if strings.Contains(command, match) {
@@ -40,14 +44,14 @@ func TestGetEndpoint(t *testing.T) {
 
 	runner := &fakeRunner{
 		responses: map[string]string{
-			"ovn-nbctl --if-exists get Logical_Switch_Port port-id _uuid":                           "lsp-uuid\n",
-			"ovn-nbctl lsp-get-ls port-id":                                                          "switch-uuid (neutron-network)\n",
-			"ovn-sbctl --bare --no-headings --columns=_uuid find Port_Binding logical_port=port-id": "binding-uuid\n",
-			"ovn-sbctl --if-exists get Port_Binding binding-uuid datapath":                          "datapath-uuid\n",
-			"ovn-sbctl --if-exists get Port_Binding binding-uuid chassis":                           "chassis-uuid\n",
-			"ovn-sbctl --if-exists get Port_Binding binding-uuid up":                                "true\n",
-			"ovn-sbctl --if-exists get Port_Binding binding-uuid tunnel_key":                        "42\n",
-			"ovn-sbctl --if-exists get Chassis chassis-uuid name":                                   "\"stack2\"\n",
+			"central|sh|-c": "lsp_uuid=lsp-uuid\n" +
+				"logical_switch=switch-uuid (neutron-network)\n" +
+				"binding_uuid=binding-uuid\n" +
+				"datapath_uuid=datapath-uuid\n" +
+				"chassis_uuid=chassis-uuid\n" +
+				"chassis_name=\"stack2\"\n" +
+				"up=true\n" +
+				"tunnel_key=42\n",
 		},
 	}
 	client := NewClient(runner, Config{

@@ -45,27 +45,46 @@ func DiscoverPath(
 	neutronPath topology.NeutronPath,
 	extraMicroflow string,
 ) (topology.OVSPath, error) {
-	source, err := sourceClient.GetEndpoint(
-		ctx,
-		neutronPath.Source.Endpoint.PortID,
-	)
-	if err != nil {
+	type endpointResult struct {
+		endpoint topology.OVSEndpoint
+		err      error
+	}
+	sourceResult := make(chan endpointResult, 1)
+	destinationResult := make(chan endpointResult, 1)
+	go func() {
+		endpoint, err := sourceClient.GetEndpoint(
+			ctx,
+			neutronPath.Source.Endpoint.PortID,
+		)
+		sourceResult <- endpointResult{endpoint: endpoint, err: err}
+	}()
+	go func() {
+		endpoint, err := destinationClient.GetEndpoint(
+			ctx,
+			neutronPath.Destination.Endpoint.PortID,
+		)
+		destinationResult <- endpointResult{
+			endpoint: endpoint,
+			err:      err,
+		}
+	}()
+
+	sourceObservation := <-sourceResult
+	destinationObservation := <-destinationResult
+	if sourceObservation.err != nil {
 		return topology.OVSPath{}, fmt.Errorf(
 			"source OVS endpoint: %w",
-			err,
+			sourceObservation.err,
 		)
 	}
-
-	destination, err := destinationClient.GetEndpoint(
-		ctx,
-		neutronPath.Destination.Endpoint.PortID,
-	)
-	if err != nil {
+	if destinationObservation.err != nil {
 		return topology.OVSPath{}, fmt.Errorf(
 			"destination OVS endpoint: %w",
-			err,
+			destinationObservation.err,
 		)
 	}
+	source := sourceObservation.endpoint
+	destination := destinationObservation.endpoint
 
 	flow, err := BuildTraceFlow(
 		neutronPath.Source,
@@ -94,19 +113,11 @@ func (client *Client) GetEndpoint(
 	ctx context.Context,
 	logicalPort string,
 ) (topology.OVSEndpoint, error) {
-	interfaceName, err := client.vsctl(
-		ctx,
-		"--bare",
-		"--no-headings",
-		"--columns=name",
-		"find",
-		"Interface",
-		"external_ids:iface-id="+logicalPort,
-	)
+	snapshot, err := client.endpointSnapshot(ctx, logicalPort)
 	if err != nil {
 		return topology.OVSEndpoint{}, err
 	}
-	interfaceName = cleanOVSValue(firstLine(interfaceName))
+	interfaceName := cleanOVSValue(snapshot["interface"])
 	if interfaceName == "" {
 		return topology.OVSEndpoint{}, fmt.Errorf(
 			"%w for logical port %s on %s",
@@ -116,17 +127,7 @@ func (client *Client) GetEndpoint(
 		)
 	}
 
-	ofportValue, err := client.vsctl(
-		ctx,
-		"--if-exists",
-		"get",
-		"Interface",
-		interfaceName,
-		"ofport",
-	)
-	if err != nil {
-		return topology.OVSEndpoint{}, err
-	}
+	ofportValue := snapshot["ofport"]
 	ofport, err := strconv.Atoi(cleanOVSValue(ofportValue))
 	if err != nil {
 		return topology.OVSEndpoint{}, fmt.Errorf(
@@ -137,37 +138,52 @@ func (client *Client) GetEndpoint(
 		)
 	}
 
-	linkState, err := client.vsctl(
-		ctx,
-		"--if-exists",
-		"get",
-		"Interface",
-		interfaceName,
-		"link_state",
-	)
-	if err != nil {
-		return topology.OVSEndpoint{}, err
-	}
-	interfaceError, err := client.vsctl(
-		ctx,
-		"--if-exists",
-		"get",
-		"Interface",
-		interfaceName,
-		"error",
-	)
-	if err != nil {
-		return topology.OVSEndpoint{}, err
-	}
-
 	return topology.OVSEndpoint{
 		Host:        client.config.Host,
 		Interface:   interfaceName,
 		OFPort:      ofport,
-		LinkState:   cleanOVSValue(linkState),
-		Error:       cleanOVSValue(interfaceError),
+		LinkState:   cleanOVSValue(snapshot["link_state"]),
+		Error:       cleanOVSValue(snapshot["error"]),
 		LogicalPort: logicalPort,
 	}, nil
+}
+
+func (client *Client) endpointSnapshot(
+	ctx context.Context,
+	logicalPort string,
+) (map[string]string, error) {
+	const script = `set -eu
+engine=$1
+container=$2
+port=$3
+run() { "$engine" exec "$container" "$@"; }
+interface=$(run ovs-vsctl --bare --no-headings --columns=name find Interface external_ids:iface-id="$port" | head -n1)
+ofport=
+link_state=
+interface_error=
+if [ -n "$interface" ]; then
+    ofport=$(run ovs-vsctl --if-exists get Interface "$interface" ofport | head -n1)
+    link_state=$(run ovs-vsctl --if-exists get Interface "$interface" link_state | head -n1)
+    interface_error=$(run ovs-vsctl --if-exists get Interface "$interface" error | head -n1)
+fi
+printf 'interface=%s\nofport=%s\nlink_state=%s\nerror=%s\n' \
+    "$interface" "$ofport" "$link_state" "$interface_error"`
+
+	result, err := client.runner.Run(
+		ctx,
+		client.config.Host,
+		"sh",
+		"-c",
+		script,
+		"pathfinder-ovs-snapshot",
+		client.config.ContainerEngine,
+		client.config.Container,
+		logicalPort,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("OVS endpoint snapshot: %w", err)
+	}
+	return parseSnapshot(result.Stdout), nil
 }
 
 func (client *Client) Trace(
@@ -233,4 +249,15 @@ func firstLine(value string) string {
 		return value[:index]
 	}
 	return value
+}
+
+func parseSnapshot(output string) map[string]string {
+	result := make(map[string]string)
+	for _, line := range strings.Split(output, "\n") {
+		key, value, found := strings.Cut(line, "=")
+		if found {
+			result[key] = value
+		}
+	}
+	return result
 }

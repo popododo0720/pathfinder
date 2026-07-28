@@ -45,27 +45,46 @@ func (client *Client) DiscoverPath(
 	connectionStates []string,
 	minimal bool,
 ) (topology.OVNPath, error) {
-	source, err := client.GetEndpoint(
-		ctx,
-		neutronPath.Source.Endpoint.PortID,
-	)
-	if err != nil {
+	type endpointResult struct {
+		endpoint topology.OVNEndpoint
+		err      error
+	}
+	sourceResult := make(chan endpointResult, 1)
+	destinationResult := make(chan endpointResult, 1)
+	go func() {
+		endpoint, err := client.GetEndpoint(
+			ctx,
+			neutronPath.Source.Endpoint.PortID,
+		)
+		sourceResult <- endpointResult{endpoint: endpoint, err: err}
+	}()
+	go func() {
+		endpoint, err := client.GetEndpoint(
+			ctx,
+			neutronPath.Destination.Endpoint.PortID,
+		)
+		destinationResult <- endpointResult{
+			endpoint: endpoint,
+			err:      err,
+		}
+	}()
+
+	sourceObservation := <-sourceResult
+	destinationObservation := <-destinationResult
+	if sourceObservation.err != nil {
 		return topology.OVNPath{}, fmt.Errorf(
 			"source OVN endpoint: %w",
-			err,
+			sourceObservation.err,
 		)
 	}
-
-	destination, err := client.GetEndpoint(
-		ctx,
-		neutronPath.Destination.Endpoint.PortID,
-	)
-	if err != nil {
+	if destinationObservation.err != nil {
 		return topology.OVNPath{}, fmt.Errorf(
 			"destination OVN endpoint: %w",
-			err,
+			destinationObservation.err,
 		)
 	}
+	source := sourceObservation.endpoint
+	destination := destinationObservation.endpoint
 
 	microflow, err := BuildMicroflow(
 		neutronPath.Source,
@@ -99,17 +118,11 @@ func (client *Client) GetEndpoint(
 	ctx context.Context,
 	logicalPort string,
 ) (topology.OVNEndpoint, error) {
-	logicalPortUUID, err := client.nbctl(
-		ctx,
-		"--if-exists",
-		"get",
-		"Logical_Switch_Port",
-		logicalPort,
-		"_uuid",
-	)
+	snapshot, err := client.endpointSnapshot(ctx, logicalPort)
 	if err != nil {
 		return topology.OVNEndpoint{}, err
 	}
+	logicalPortUUID := snapshot["lsp_uuid"]
 	if logicalPortUUID == "" {
 		return topology.OVNEndpoint{}, fmt.Errorf(
 			"%w: %s",
@@ -118,93 +131,76 @@ func (client *Client) GetEndpoint(
 		)
 	}
 
-	logicalSwitch, err := client.nbctl(
-		ctx,
-		"lsp-get-ls",
-		logicalPort,
-	)
-	if err != nil {
-		return topology.OVNEndpoint{}, err
-	}
-	logicalSwitch = referenceDisplayName(logicalSwitch)
-
-	portBindingUUID, err := client.sbctl(
-		ctx,
-		"--bare",
-		"--no-headings",
-		"--columns=_uuid",
-		"find",
-		"Port_Binding",
-		"logical_port="+logicalPort,
-	)
-	if err != nil {
-		return topology.OVNEndpoint{}, err
-	}
-
 	endpoint := topology.OVNEndpoint{
 		LogicalPort:     logicalPort,
 		LogicalPortUUID: cleanOVSValue(logicalPortUUID),
-		LogicalSwitch:   cleanOVSValue(logicalSwitch),
-		PortBindingUUID: cleanOVSValue(firstLine(portBindingUUID)),
+		LogicalSwitch: referenceDisplayName(
+			snapshot["logical_switch"],
+		),
+		PortBindingUUID: cleanOVSValue(snapshot["binding_uuid"]),
 	}
 	if endpoint.PortBindingUUID == "" {
 		return endpoint, nil
 	}
 
-	endpoint.DatapathUUID, err = client.sbGet(
-		ctx,
-		"Port_Binding",
-		endpoint.PortBindingUUID,
-		"datapath",
+	endpoint.DatapathUUID = cleanOVSValue(snapshot["datapath_uuid"])
+	endpoint.ChassisUUID = cleanOVSValue(snapshot["chassis_uuid"])
+	endpoint.ChassisName = cleanOVSValue(snapshot["chassis_name"])
+	endpoint.Up, _ = strconv.ParseBool(
+		cleanOVSValue(snapshot["up"]),
 	)
-	if err != nil {
-		return topology.OVNEndpoint{}, err
-	}
-	endpoint.ChassisUUID, err = client.sbGet(
-		ctx,
-		"Port_Binding",
-		endpoint.PortBindingUUID,
-		"chassis",
+	endpoint.PortBindingTunnel, _ = strconv.Atoi(
+		cleanOVSValue(snapshot["tunnel_key"]),
 	)
-	if err != nil {
-		return topology.OVNEndpoint{}, err
-	}
-
-	up, err := client.sbGet(
-		ctx,
-		"Port_Binding",
-		endpoint.PortBindingUUID,
-		"up",
-	)
-	if err != nil {
-		return topology.OVNEndpoint{}, err
-	}
-	endpoint.Up, _ = strconv.ParseBool(up)
-
-	tunnelKey, err := client.sbGet(
-		ctx,
-		"Port_Binding",
-		endpoint.PortBindingUUID,
-		"tunnel_key",
-	)
-	if err != nil {
-		return topology.OVNEndpoint{}, err
-	}
-	endpoint.PortBindingTunnel, _ = strconv.Atoi(tunnelKey)
-
-	if endpoint.ChassisUUID != "" {
-		endpoint.ChassisName, err = client.sbGet(
-			ctx,
-			"Chassis",
-			endpoint.ChassisUUID,
-			"name",
-		)
-		if err != nil {
-			return topology.OVNEndpoint{}, err
-		}
-	}
 
 	return endpoint, nil
+}
+
+func (client *Client) endpointSnapshot(
+	ctx context.Context,
+	logicalPort string,
+) (map[string]string, error) {
+	const script = `set -eu
+engine=$1
+container=$2
+port=$3
+run() { "$engine" exec "$container" "$@"; }
+lsp_uuid=$(run ovn-nbctl --if-exists get Logical_Switch_Port "$port" _uuid | head -n1)
+logical_switch=$(run ovn-nbctl lsp-get-ls "$port" | head -n1)
+binding_uuid=$(run ovn-sbctl --bare --no-headings --columns=_uuid find Port_Binding logical_port="$port" | head -n1)
+datapath_uuid=
+chassis_uuid=
+chassis_name=
+up=
+tunnel_key=
+if [ -n "$binding_uuid" ]; then
+    datapath_uuid=$(run ovn-sbctl --if-exists get Port_Binding "$binding_uuid" datapath | head -n1)
+    chassis_uuid=$(run ovn-sbctl --if-exists get Port_Binding "$binding_uuid" chassis | head -n1)
+    up=$(run ovn-sbctl --if-exists get Port_Binding "$binding_uuid" up | head -n1)
+    tunnel_key=$(run ovn-sbctl --if-exists get Port_Binding "$binding_uuid" tunnel_key | head -n1)
+    if [ -n "$chassis_uuid" ]; then
+        chassis_name=$(run ovn-sbctl --if-exists get Chassis "$chassis_uuid" name | head -n1)
+    fi
+fi
+printf 'lsp_uuid=%s\nlogical_switch=%s\nbinding_uuid=%s\ndatapath_uuid=%s\nchassis_uuid=%s\nchassis_name=%s\nup=%s\ntunnel_key=%s\n' \
+    "$lsp_uuid" "$logical_switch" "$binding_uuid" "$datapath_uuid" \
+    "$chassis_uuid" "$chassis_name" "$up" "$tunnel_key"`
+
+	result, err := client.runner.Run(
+		ctx,
+		client.config.Host,
+		"sh",
+		"-c",
+		script,
+		"pathfinder-ovn-snapshot",
+		client.config.ContainerEngine,
+		client.config.Container,
+		logicalPort,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("OVN endpoint snapshot: %w", err)
+	}
+	return parseSnapshot(result.Stdout), nil
 }
 
 func (client *Client) Trace(
@@ -305,6 +301,17 @@ func firstLine(value string) string {
 		return value[:index]
 	}
 	return value
+}
+
+func parseSnapshot(output string) map[string]string {
+	result := make(map[string]string)
+	for _, line := range strings.Split(output, "\n") {
+		key, value, found := strings.Cut(line, "=")
+		if found {
+			result[key] = value
+		}
+	}
+	return result
 }
 
 func referenceDisplayName(value string) string {

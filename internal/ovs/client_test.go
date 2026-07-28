@@ -33,10 +33,10 @@ func TestGetEndpoint(t *testing.T) {
 
 	runner := &fakeRunner{
 		responses: map[string]string{
-			"ovs-vsctl --bare --no-headings --columns=name find Interface external_ids:iface-id=port-id": "tap123\n",
-			"ovs-vsctl --if-exists get Interface tap123 ofport":                                          "9\n",
-			"ovs-vsctl --if-exists get Interface tap123 link_state":                                      "\"up\"\n",
-			"ovs-vsctl --if-exists get Interface tap123 error":                                           "[]\n",
+			"stack2|sh|-c": "interface=tap123\n" +
+				"ofport=9\n" +
+				"link_state=\"up\"\n" +
+				"error=[]\n",
 		},
 	}
 	client := NewClient(runner, Config{
