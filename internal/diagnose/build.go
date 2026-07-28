@@ -180,6 +180,21 @@ func Build(input Input) Report {
 			"end-to-end verification",
 			probeStatus,
 		)
+		if input.Probe != nil && input.Probe.ReplyExpected {
+			replyStatus, replyDetail := observedReply(input.Probe)
+			builder.addHop(Hop{
+				ID:     "return-probe",
+				Label:  "return packet delivery",
+				Status: replyStatus,
+				Detail: replyDetail,
+			})
+			builder.addLink(
+				"live-probe",
+				"return-probe",
+				"reply verification",
+				replyStatus,
+			)
+		}
 	}
 
 	builder.addTraceFindings(input)
@@ -202,21 +217,31 @@ func observedProbe(
 		return StatusFail, "packet was not injected"
 	}
 	if !probe.Delivered {
-		return StatusFail, fmt.Sprintf(
-			"packet injected but destination tap tx_packets did not increase (%d -> %d)",
-			probe.DestinationTXBefore,
-			probe.DestinationTXAfter,
-		)
+		return StatusFail,
+			"packet injected but its exact marker was not observed " +
+				"on the destination tap"
 	}
 	return StatusPass, fmt.Sprintf(
-		"%s %s:%d -> %s:%d delivered; destination tx_packets +%d",
+		"%s %s:%d -> %s:%d delivered; exact marker=%s",
 		probe.Protocol,
 		probe.SourceIP,
 		probe.SourcePort,
 		probe.DestinationIP,
 		probe.DestinationPort,
-		probe.DestinationTXDelta,
+		probe.Marker,
 	)
+}
+
+func observedReply(probe *topology.ProbeResult) (Status, string) {
+	if probe.ReplyObserved {
+		return StatusPass, fmt.Sprintf(
+			"reply observed on source tap; filter=%s",
+			probe.ReplyFilter,
+		)
+	}
+	return StatusFail,
+		"forward packet arrived, but no matching reply was observed " +
+			"on the source tap"
 }
 
 type reportBuilder struct {

@@ -7,12 +7,18 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"pathfinder/internal/execx"
 	"pathfinder/internal/topology"
 )
 
 var ErrInterfaceNotFound = errors.New("OVS interface not found")
+
+type CaptureResult struct {
+	Output   string
+	TimedOut bool
+}
 
 type Config struct {
 	Host            string
@@ -217,39 +223,48 @@ func (client *Client) InjectPacket(
 	return err
 }
 
-func (client *Client) TXPackets(
+func (client *Client) CapturePacket(
 	ctx context.Context,
 	interfaceName string,
-) (uint64, error) {
-	value, err := client.vsctl(
+	filter string,
+	timeout time.Duration,
+) (CaptureResult, error) {
+	if timeout <= 0 {
+		timeout = time.Second
+	}
+	result, err := client.runner.Run(
 		ctx,
-		"--if-exists",
-		"get",
-		"Interface",
+		client.config.Host,
+		"timeout",
+		"--signal=INT",
+		timeout.String(),
+		"tcpdump",
+		"-i",
 		interfaceName,
-		"statistics:tx_packets",
+		"-nne",
+		"-l",
+		"-c",
+		"1",
+		filter,
 	)
 	if err != nil {
-		return 0, err
-	}
-	value = cleanOVSValue(value)
-	counter, err := strconv.ParseUint(value, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf(
-			"parse tx_packets %q for %s: %w",
-			value,
+		var commandError *execx.CommandError
+		if errors.As(err, &commandError) &&
+			commandError.ExitCode == 124 {
+			return CaptureResult{TimedOut: true}, nil
+		}
+		return CaptureResult{}, fmt.Errorf(
+			"capture on %s: %w",
 			interfaceName,
 			err,
 		)
 	}
-	return counter, nil
-}
-
-func (client *Client) vsctl(
-	ctx context.Context,
-	args ...string,
-) (string, error) {
-	return client.run(ctx, "ovs-vsctl", args...)
+	return CaptureResult{
+		Output: strings.TrimSpace(
+			strings.TrimSpace(result.Stdout) + "\n" +
+				strings.TrimSpace(result.Stderr),
+		),
+	}, nil
 }
 
 func (client *Client) run(

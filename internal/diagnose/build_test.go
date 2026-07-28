@@ -59,14 +59,14 @@ func TestBuildLiveProbeVerifiesExternalPhysicalPath(t *testing.T) {
 	path.Destination.Network.PhysicalNetwork = "external"
 	path.Destination.Network.SegmentationID = "55"
 	probe := topology.ProbeResult{
-		Protocol:            "icmp",
-		SourceIP:            "192.168.0.78",
-		DestinationIP:       "192.168.55.148",
-		DestinationTXBefore: 100,
-		DestinationTXAfter:  101,
-		DestinationTXDelta:  1,
-		Injected:            true,
-		Delivered:           true,
+		Protocol:      "icmp",
+		SourceIP:      "192.168.0.78",
+		DestinationIP: "192.168.55.148",
+		Injected:      true,
+		Delivered:     true,
+		ReplyExpected: true,
+		ReplyObserved: true,
+		Marker:        "icmp-id:42",
 	}
 
 	result := Build(Input{
@@ -219,16 +219,16 @@ func TestBuildReportsDeliveredLiveProbe(t *testing.T) {
 
 	path := testNeutronPath("network", "network")
 	probe := topology.ProbeResult{
-		Protocol:            "tcp",
-		SourceIP:            "192.0.2.10",
-		DestinationIP:       "192.0.2.20",
-		SourcePort:          45000,
-		DestinationPort:     443,
-		DestinationTXBefore: 10,
-		DestinationTXAfter:  11,
-		DestinationTXDelta:  1,
-		Injected:            true,
-		Delivered:           true,
+		Protocol:        "tcp",
+		SourceIP:        "192.0.2.10",
+		DestinationIP:   "192.0.2.20",
+		SourcePort:      45000,
+		DestinationPort: 443,
+		Injected:        true,
+		Delivered:       true,
+		ReplyExpected:   true,
+		ReplyObserved:   true,
+		Marker:          "tcp:45000->443",
 	}
 	result := Build(Input{
 		Neutron:        path,
@@ -247,6 +247,35 @@ func TestBuildReportsDeliveredLiveProbe(t *testing.T) {
 	if !hasHop(result, "live-probe", StatusPass) {
 		t.Fatalf("successful live-probe hop not found: %v", result.Hops)
 	}
+	if !hasHop(result, "return-probe", StatusPass) {
+		t.Fatalf("successful return-probe hop not found: %v", result.Hops)
+	}
+}
+
+func TestBuildFailsWhenExpectedReplyIsNotObserved(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	probe := topology.ProbeResult{
+		Protocol:      "icmp",
+		Injected:      true,
+		Delivered:     true,
+		ReplyExpected: true,
+		ReplyObserved: false,
+		Marker:        "icmp-id:42",
+	}
+	result := Build(Input{
+		Neutron:        path,
+		Probe:          &probe,
+		ProbeRequested: true,
+	})
+
+	if result.Verdict != StatusFail {
+		t.Fatalf("Verdict = %s", result.Verdict)
+	}
+	if !hasHop(result, "return-probe", StatusFail) {
+		t.Fatalf("failed return-probe hop not found: %v", result.Hops)
+	}
 }
 
 func TestBuildFailsWhenLiveProbeIsNotDelivered(t *testing.T) {
@@ -254,9 +283,7 @@ func TestBuildFailsWhenLiveProbeIsNotDelivered(t *testing.T) {
 
 	path := testNeutronPath("network", "network")
 	probe := topology.ProbeResult{
-		Injected:            true,
-		DestinationTXBefore: 10,
-		DestinationTXAfter:  10,
+		Injected: true,
 	}
 	result := Build(Input{
 		Neutron:        path,

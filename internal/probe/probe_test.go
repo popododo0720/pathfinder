@@ -13,9 +13,8 @@ import (
 )
 
 type probeRunner struct {
-	mu          sync.Mutex
-	counterRead int
-	commands    []string
+	mu       sync.Mutex
+	commands []string
 }
 
 func (runner *probeRunner) Run(
@@ -28,12 +27,13 @@ func (runner *probeRunner) Run(
 	defer runner.mu.Unlock()
 	command := host + "|" + name + "|" + strings.Join(args, " ")
 	runner.commands = append(runner.commands, command)
-	if strings.Contains(command, "statistics:tx_packets") {
-		runner.counterRead++
-		if runner.counterRead == 1 {
-			return execx.Result{Stdout: "10\n"}, nil
+	if strings.Contains(command, "tcpdump") {
+		if host == "destination-host" {
+			return execx.Result{
+				Stdout: "generated request matched\n",
+			}, nil
 		}
-		return execx.Result{Stdout: "11\n"}, nil
+		return execx.Result{Stdout: "reply matched\n"}, nil
 	}
 	return execx.Result{}, nil
 }
@@ -74,8 +74,12 @@ func TestRunInjectsAndDetectsDelivery(t *testing.T) {
 	if !result.Injected || !result.Delivered {
 		t.Fatalf("probe result = %+v", result)
 	}
-	if result.DestinationTXDelta != 1 {
-		t.Fatalf("DestinationTXDelta = %d", result.DestinationTXDelta)
+	if result.Method !=
+		"ovs-ofctl packet-out + exact tap packet capture" {
+		t.Fatalf("Method = %q", result.Method)
+	}
+	if result.RequestCapture == "" {
+		t.Fatal("exact request capture is empty")
 	}
 
 	runner.mu.Lock()

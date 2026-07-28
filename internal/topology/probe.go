@@ -4,6 +4,8 @@ import "time"
 
 type ProbeResult struct {
 	Method               string
+	Mode                 string
+	Marker               string
 	Protocol             string
 	SourceIP             string
 	DestinationIP        string
@@ -11,11 +13,15 @@ type ProbeResult struct {
 	DestinationPort      int
 	SourceMAC            string
 	DestinationMAC       string
-	DestinationTXBefore  uint64
-	DestinationTXAfter   uint64
-	DestinationTXDelta   uint64
 	Injected             bool
+	SourceObserved       bool
 	Delivered            bool
+	ReplyExpected        bool
+	ReplyObserved        bool
+	RequestFilter        string
+	ReplyFilter          string
+	RequestCapture       string
+	ReplyCapture         string
 	Duration             time.Duration
 	DetectionDescription string
 }

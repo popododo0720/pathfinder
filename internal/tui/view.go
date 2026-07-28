@@ -363,10 +363,18 @@ func (model Model) probeContent() string {
 	if probe.Delivered {
 		status = "DELIVERED"
 	}
+	reply := "not expected"
+	if probe.ReplyExpected {
+		reply = "NOT OBSERVED"
+		if probe.ReplyObserved {
+			reply = "OBSERVED"
+		}
+	}
 	return fmt.Sprintf(
-		"LIVE PROBE: %s\n\nMethod: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nInjected: %t\nDestination tx_packets: %d -> %d (delta %d)\nDuration: %s\n\n%s",
+		"LIVE PROBE: %s\n\nMethod: %s\nMarker: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nInjected: %t\nExact destination capture: %t\nReply: %s\nDuration: %s\n\nRequest filter:\n%s\n\nReply filter:\n%s\n\n%s",
 		status,
 		probe.Method,
+		probe.Marker,
 		probe.Protocol,
 		probe.SourceIP,
 		probe.SourcePort,
@@ -375,10 +383,11 @@ func (model Model) probeContent() string {
 		probe.DestinationPort,
 		probe.DestinationMAC,
 		probe.Injected,
-		probe.DestinationTXBefore,
-		probe.DestinationTXAfter,
-		probe.DestinationTXDelta,
+		probe.Delivered,
+		reply,
 		shortDuration(probe.Duration),
+		probe.RequestFilter,
+		probe.ReplyFilter,
 		probe.DetectionDescription,
 	)
 }

@@ -40,6 +40,7 @@ var (
 
 type Packet struct {
 	Bytes           []byte
+	Identifier      uint16
 	Protocol        string
 	SourceIP        netip.Addr
 	DestinationIP   netip.Addr
@@ -72,15 +73,19 @@ func BuildPacket(
 	protocol := parseProtocol(microflow)
 	sourcePort := parsePort(sourcePortPattern, microflow)
 	destinationPort := parsePort(destinationPortPattern, microflow)
-	if sourcePort == 0 {
-		sourcePort = 40000 + int(randomUint16()%20000)
-	}
+	identifier := randomUint16()
 	switch protocol {
 	case "tcp":
+		if sourcePort == 0 {
+			sourcePort = 40000 + int(randomUint16()%20000)
+		}
 		if destinationPort == 0 {
 			destinationPort = 80
 		}
 	case "udp":
+		if sourcePort == 0 {
+			sourcePort = 40000 + int(randomUint16()%20000)
+		}
 		if destinationPort == 0 {
 			destinationPort = 53
 		}
@@ -92,12 +97,14 @@ func BuildPacket(
 		destinationIP,
 		sourcePort,
 		destinationPort,
+		identifier,
 	)
 	ipHeader := buildIPv4Header(
 		sourceIP,
 		destinationIP,
 		protocolNumber,
 		len(transport),
+		identifier,
 	)
 
 	frame := make([]byte, 0, 14+len(ipHeader)+len(transport))
@@ -112,6 +119,7 @@ func BuildPacket(
 
 	return Packet{
 		Bytes:           frame,
+		Identifier:      identifier,
 		Protocol:        protocol,
 		SourceIP:        sourceIP,
 		DestinationIP:   destinationIP,
@@ -124,6 +132,79 @@ func BuildPacket(
 
 func (packet Packet) Hex() string {
 	return hex.EncodeToString(packet.Bytes)
+}
+
+func (packet Packet) Marker() string {
+	switch packet.Protocol {
+	case "tcp", "udp":
+		return fmt.Sprintf(
+			"%s:%d->%d",
+			packet.Protocol,
+			packet.SourcePort,
+			packet.DestinationPort,
+		)
+	default:
+		return fmt.Sprintf("icmp-id:%d", packet.Identifier)
+	}
+}
+
+func (packet Packet) RequestFilter() string {
+	base := fmt.Sprintf(
+		"src host %s and dst host %s",
+		packet.SourceIP,
+		packet.DestinationIP,
+	)
+	switch packet.Protocol {
+	case "tcp", "udp":
+		return fmt.Sprintf(
+			"%s and %s src port %d and %s dst port %d",
+			base,
+			packet.Protocol,
+			packet.SourcePort,
+			packet.Protocol,
+			packet.DestinationPort,
+		)
+	default:
+		return fmt.Sprintf(
+			"%s and icmp and icmp[0] = 8 and icmp[4:2] = %d",
+			base,
+			packet.Identifier,
+		)
+	}
+}
+
+func (packet Packet) ReplyFilter() string {
+	base := fmt.Sprintf(
+		"src host %s and dst host %s",
+		packet.DestinationIP,
+		packet.SourceIP,
+	)
+	switch packet.Protocol {
+	case "tcp":
+		return fmt.Sprintf(
+			"%s and tcp src port %d and tcp dst port %d and (tcp[13] & 0x16 != 0)",
+			base,
+			packet.DestinationPort,
+			packet.SourcePort,
+		)
+	case "udp":
+		return fmt.Sprintf(
+			"%s and udp src port %d and udp dst port %d",
+			base,
+			packet.DestinationPort,
+			packet.SourcePort,
+		)
+	default:
+		return fmt.Sprintf(
+			"%s and icmp and icmp[0] = 0 and icmp[4:2] = %d",
+			base,
+			packet.Identifier,
+		)
+	}
+}
+
+func (packet Packet) ReplyExpected() bool {
+	return packet.Protocol == "icmp" || packet.Protocol == "tcp"
 }
 
 func compatibleIPv4(
@@ -200,6 +281,7 @@ func buildTransport(
 	destinationIP netip.Addr,
 	sourcePort int,
 	destinationPort int,
+	identifier uint16,
 ) ([]byte, byte) {
 	switch protocol {
 	case "tcp":
@@ -217,7 +299,7 @@ func buildTransport(
 			destinationPort,
 		), 17
 	default:
-		return buildICMP(), 1
+		return buildICMP(identifier), 1
 	}
 }
 
@@ -226,6 +308,7 @@ func buildIPv4Header(
 	destinationIP netip.Addr,
 	protocol byte,
 	payloadLength int,
+	identifier uint16,
 ) []byte {
 	header := make([]byte, 20)
 	header[0] = 0x45
@@ -233,7 +316,7 @@ func buildIPv4Header(
 		header[2:4],
 		uint16(len(header)+payloadLength),
 	)
-	binary.BigEndian.PutUint16(header[4:6], randomUint16())
+	binary.BigEndian.PutUint16(header[4:6], identifier)
 	binary.BigEndian.PutUint16(header[6:8], 0x4000)
 	header[8] = 64
 	header[9] = protocol
@@ -286,11 +369,11 @@ func buildUDP(
 	return packet
 }
 
-func buildICMP() []byte {
+func buildICMP(identifier uint16) []byte {
 	payload := []byte("pathfinder-live-probe")
 	packet := make([]byte, 8+len(payload))
 	packet[0] = 8
-	binary.BigEndian.PutUint16(packet[4:6], randomUint16())
+	binary.BigEndian.PutUint16(packet[4:6], identifier)
 	binary.BigEndian.PutUint16(packet[6:8], 1)
 	copy(packet[8:], payload)
 	binary.BigEndian.PutUint16(packet[2:4], checksum(packet))

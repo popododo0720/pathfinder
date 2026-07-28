@@ -3,6 +3,8 @@ package probe
 import (
 	"encoding/binary"
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 
 	"pathfinder/internal/topology"
@@ -41,6 +43,49 @@ func TestBuildPacketCreatesIPv4TCPSYN(t *testing.T) {
 	}
 	if packet.Bytes[47]&0x02 == 0 {
 		t.Fatal("TCP SYN flag is not set")
+	}
+	for _, expected := range []string{
+		"src host 192.0.2.10",
+		"dst host 192.0.2.20",
+		"tcp src port",
+		"tcp dst port 443",
+	} {
+		if !strings.Contains(packet.RequestFilter(), expected) {
+			t.Fatalf(
+				"RequestFilter %q does not contain %q",
+				packet.RequestFilter(),
+				expected,
+			)
+		}
+	}
+	if !packet.ReplyExpected() {
+		t.Fatal("TCP reply should be expected")
+	}
+}
+
+func TestBuildPacketCreatesCorrelatedICMPFilters(t *testing.T) {
+	t.Parallel()
+
+	packet, err := BuildPacket(
+		testPath("network", "network"),
+		"icmp",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identifier := strconv.Itoa(int(packet.Identifier))
+	if !strings.Contains(packet.RequestFilter(), "icmp[4:2] = "+identifier) {
+		t.Fatalf("RequestFilter = %q", packet.RequestFilter())
+	}
+	if !strings.Contains(packet.ReplyFilter(), "icmp[4:2] = "+identifier) {
+		t.Fatalf("ReplyFilter = %q", packet.ReplyFilter())
+	}
+	if packet.SourcePort != 0 || packet.DestinationPort != 0 {
+		t.Fatalf(
+			"ICMP ports = %d -> %d",
+			packet.SourcePort,
+			packet.DestinationPort,
+		)
 	}
 }
 
