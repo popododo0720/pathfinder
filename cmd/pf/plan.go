@@ -47,11 +47,55 @@ func newPlanCommand() *cobra.Command {
 				return fmt.Errorf("get destination port %q: %w", destination, err)
 			}
 
+			sameNetwork := sourceEndpoint.SameNetwork(destinationEndpoint)
+
+			sourceNetwork, err := cloud.GetNetwork(
+				ctx,
+				networkClient,
+				sourceEndpoint.NetworkID,
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"get source network %q: %w",
+					sourceEndpoint.NetworkID,
+					err,
+				)
+			}
+
+			destinationNetwork := sourceNetwork
+			if !sameNetwork {
+				destinationNetwork, err = cloud.GetNetwork(
+					ctx,
+					networkClient,
+					destinationEndpoint.NetworkID,
+				)
+				if err != nil {
+					return fmt.Errorf(
+						"get destination network %q: %w",
+						destinationEndpoint.NetworkID,
+						err,
+					)
+				}
+			}
+
 			command.Printf("source ID: %s\n", sourceEndpoint.PortID)
 			command.Printf("source name: %s\n", sourceEndpoint.Name)
 			command.Printf("source status: %s\n", sourceEndpoint.Status)
 			command.Printf("source MAC: %s\n", sourceEndpoint.MACAddress)
-			command.Printf("source network ID: %s\n", sourceEndpoint.NetworkID)
+			command.Printf("source network ID: %s\n", sourceNetwork.ID)
+			command.Printf("source network name: %s\n", sourceNetwork.Name)
+			command.Printf("source network status: %s\n", sourceNetwork.Status)
+			command.Printf("source network external: %t\n", sourceNetwork.External)
+			command.Printf("source network type: %s\n", sourceNetwork.NetworkType)
+			command.Printf(
+				"source physical network: %s\n",
+				sourceNetwork.PhysicalNetwork,
+			)
+			command.Printf(
+				"source segmentation ID: %s\n",
+				sourceNetwork.SegmentationID,
+			)
+			command.Printf("source MTU: %d\n", sourceNetwork.MTU)
 			for index, fixedIP := range sourceEndpoint.FixedIPs {
 				command.Printf(
 					"source fixed IP[%d]: %s (subnet: %s)\n",
@@ -71,8 +115,37 @@ func newPlanCommand() *cobra.Command {
 			command.Printf("destination MAC: %s\n", destinationEndpoint.MACAddress)
 			command.Printf(
 				"destination network ID: %s\n",
-				destinationEndpoint.NetworkID,
+				destinationNetwork.ID,
 			)
+			command.Printf(
+				"destination network name: %s\n",
+				destinationNetwork.Name,
+			)
+			command.Printf(
+				"destination network status: %s\n",
+				destinationNetwork.Status,
+			)
+			command.Printf(
+				"destination network external: %t\n",
+				destinationNetwork.External,
+			)
+			command.Printf(
+				"destination network type: %s\n",
+				destinationNetwork.NetworkType,
+			)
+			command.Printf(
+				"destination physical network: %s\n",
+				destinationNetwork.PhysicalNetwork,
+			)
+			command.Printf(
+				"destination segmentation ID: %s\n",
+				destinationNetwork.SegmentationID,
+			)
+			command.Printf(
+				"destination MTU: %d\n",
+				destinationNetwork.MTU,
+			)
+
 			for index, fixedIP := range destinationEndpoint.FixedIPs {
 				command.Printf(
 					"destination fixed IP[%d]: %s (subnet: %s)\n",
@@ -108,7 +181,6 @@ func newPlanCommand() *cobra.Command {
 				command.Printf("ct[%d]: %s\n", index, state)
 			}
 
-			sameNetwork := sourceEndpoint.SameNetwork(destinationEndpoint)
 			command.Printf("same network: %t\n", sameNetwork)
 
 			return nil
