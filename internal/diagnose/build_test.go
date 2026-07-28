@@ -64,6 +64,54 @@ func TestBuildFailsWhenNoRouteExists(t *testing.T) {
 	}
 }
 
+func TestBuildRecognizesExternalToInternalRouterPath(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("external-network", "internal-network")
+	path.Source.Network.External = true
+	path.Routers = []topology.Router{
+		{
+			ID:                "router",
+			Name:              "router",
+			Status:            "ACTIVE",
+			AdminStateUp:      true,
+			ExternalNetworkID: "external-network",
+			InterfaceSubnets:  []string{"internal-network-subnet"},
+		},
+	}
+	result := Build(Input{
+		Neutron:   path,
+		Microflow: "tcp.dst == 443",
+	})
+	if result.Verdict != StatusPass {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+}
+
+func TestBuildFailsWhenNetworkIsDown(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	path.Destination.Network.Status = "DOWN"
+	result := Build(Input{
+		Neutron:   path,
+		Microflow: "tcp.dst == 443",
+	})
+	if result.Verdict != StatusFail {
+		t.Fatalf("Verdict = %s", result.Verdict)
+	}
+	if !hasFinding(result, "destination-network", StatusFail) {
+		t.Fatalf(
+			"destination network failure not found: %v",
+			result.Findings,
+		)
+	}
+}
+
 func TestBuildFailsWhenDestinationSecurityGroupDenies(t *testing.T) {
 	t.Parallel()
 

@@ -156,6 +156,7 @@ func Build(input Input) Report {
 	)
 
 	builder.addTraceFindings(input)
+	builder.addNetworkFindings(input.Neutron)
 	builder.addMTUFinding(input.Neutron)
 	return builder.report()
 }
@@ -364,7 +365,13 @@ func routeStatus(path topology.NeutronPath) (Status, string, string) {
 			router.ExternalNetworkID == path.Destination.Network.ID {
 			return StatusPass,
 				"Neutron router to external network",
-				router.Name
+				routerLabel(router)
+		}
+		if destinationAttached &&
+			router.ExternalNetworkID == path.Source.Network.ID {
+			return StatusPass,
+				"external network to Neutron router",
+				routerLabel(router)
 		}
 	}
 
@@ -384,6 +391,13 @@ func routeStatus(path topology.NeutronPath) (Status, string, string) {
 	return StatusFail,
 		"no Neutron route",
 		"no router connects the source and destination subnets"
+}
+
+func routerLabel(router topology.Router) string {
+	if router.Name != "" {
+		return router.Name
+	}
+	return router.ID
 }
 
 func subnetSet(subnets []topology.Subnet) map[string]struct{} {
@@ -472,5 +486,26 @@ func (builder *reportBuilder) addMTUFinding(path topology.NeutronPath) {
 				destinationMTU,
 			),
 		})
+	}
+}
+
+func (builder *reportBuilder) addNetworkFindings(
+	path topology.NeutronPath,
+) {
+	for label, network := range map[string]topology.Network{
+		"source-network":      path.Source.Network,
+		"destination-network": path.Destination.Network,
+	} {
+		if network.Status != "" && network.Status != "ACTIVE" {
+			builder.addFinding(Finding{
+				Layer:  label,
+				Status: StatusFail,
+				Message: fmt.Sprintf(
+					"Neutron network %s status=%s",
+					network.ID,
+					network.Status,
+				),
+			})
+		}
 	}
 }
