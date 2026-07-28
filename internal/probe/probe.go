@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -34,24 +35,55 @@ func Run(
 		return topology.ProbeResult{}, err
 	}
 
+	nextHop := NextHop{}
 	packet, err := BuildPacket(neutronPath, microflow)
+	if errors.Is(err, ErrNextHopMACRequired) {
+		nextHop, err = ResolveNextHop(
+			ctx,
+			sourceClient,
+			neutronPath,
+			ovsPath,
+			deliveryTimeout,
+		)
+		if err == nil {
+			packet, err = BuildPacketWithDestinationMAC(
+				neutronPath,
+				microflow,
+				nextHop.MAC,
+			)
+		}
+	} else if err == nil &&
+		!neutronPath.Source.Endpoint.SameNetwork(
+			neutronPath.Destination.Endpoint,
+		) {
+		_, _, gatewayIP, gatewayErr := sourceGateway(
+			neutronPath.Source,
+		)
+		if gatewayErr == nil {
+			nextHop.IP = gatewayIP.String()
+		}
+		nextHop.MAC = packet.DestinationMAC.String()
+		nextHop.Source = "microflow eth.dst"
+	}
 	if err != nil {
 		return topology.ProbeResult{}, err
 	}
 	result := topology.ProbeResult{
-		Method:          "ovs-ofctl packet-out + exact tap packet capture",
-		Mode:            "live",
-		Marker:          packet.Marker(),
-		Protocol:        packet.Protocol,
-		SourceIP:        packet.SourceIP.String(),
-		DestinationIP:   packet.DestinationIP.String(),
-		SourcePort:      packet.SourcePort,
-		DestinationPort: packet.DestinationPort,
-		SourceMAC:       packet.SourceMAC.String(),
-		DestinationMAC:  packet.DestinationMAC.String(),
-		ReplyExpected:   packet.ReplyExpected(),
-		RequestFilter:   packet.RequestFilter(),
-		ReplyFilter:     packet.ReplyFilter(),
+		Method:           "ovs-ofctl packet-out + exact tap packet capture",
+		Mode:             "live",
+		Marker:           packet.Marker(),
+		Protocol:         packet.Protocol,
+		SourceIP:         packet.SourceIP.String(),
+		DestinationIP:    packet.DestinationIP.String(),
+		SourcePort:       packet.SourcePort,
+		DestinationPort:  packet.DestinationPort,
+		SourceMAC:        packet.SourceMAC.String(),
+		DestinationMAC:   packet.DestinationMAC.String(),
+		NextHopIP:        nextHop.IP,
+		NextHopMACSource: nextHop.Source,
+		ReplyExpected:    packet.ReplyExpected(),
+		RequestFilter:    packet.RequestFilter(),
+		ReplyFilter:      packet.ReplyFilter(),
 		DetectionDescription: "delivery requires an exact BPF match " +
 			"for the generated packet on the destination tap",
 	}

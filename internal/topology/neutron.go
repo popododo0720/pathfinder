@@ -36,6 +36,14 @@ type Router struct {
 	Routes            []RouterRoute
 	InterfacePortIDs  []string
 	InterfaceSubnets  []string
+	Interfaces        []RouterInterface
+}
+
+type RouterInterface struct {
+	PortID     string
+	SubnetID   string
+	IPAddress  string
+	MACAddress string
 }
 
 type SecurityRule struct {

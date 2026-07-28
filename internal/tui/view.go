@@ -370,8 +370,17 @@ func (model Model) probeContent() string {
 			reply = "OBSERVED"
 		}
 	}
+	nextHop := "direct destination"
+	if probe.NextHopIP != "" || probe.NextHopMACSource != "" {
+		nextHop = fmt.Sprintf(
+			"%s (%s; %s)",
+			probe.DestinationMAC,
+			probe.NextHopIP,
+			probe.NextHopMACSource,
+		)
+	}
 	return fmt.Sprintf(
-		"LIVE PROBE: %s\n\nMethod: %s\nMarker: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nInjected: %t\nExact destination capture: %t\nReply: %s\nDuration: %s\n\nRequest filter:\n%s\n\nReply filter:\n%s\n\n%s",
+		"LIVE PROBE: %s\n\nMethod: %s\nMarker: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nNext hop: %s\nInjected: %t\nExact destination capture: %t\nReply: %s\nDuration: %s\n\nRequest filter:\n%s\n\nReply filter:\n%s\n\n%s",
 		status,
 		probe.Method,
 		probe.Marker,
@@ -382,6 +391,7 @@ func (model Model) probeContent() string {
 		probe.DestinationIP,
 		probe.DestinationPort,
 		probe.DestinationMAC,
+		nextHop,
 		probe.Injected,
 		probe.Delivered,
 		reply,

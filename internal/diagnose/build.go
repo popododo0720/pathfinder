@@ -538,7 +538,8 @@ func (builder *reportBuilder) addTraceFindings(input Input) {
 		}
 		if !input.Neutron.Source.Endpoint.SameNetwork(
 			input.Neutron.Destination.Endpoint,
-		) && !strings.Contains(input.OVS.Flow, "dl_dst=") {
+		) && !strings.Contains(input.OVS.Flow, "dl_dst=") &&
+			!probeDelivered(input) {
 			builder.addFinding(Finding{
 				Layer:  "ovs-trace",
 				Status: StatusWarning,
@@ -547,6 +548,12 @@ func (builder *reportBuilder) addTraceFindings(input Input) {
 			})
 		}
 	}
+}
+
+func probeDelivered(input Input) bool {
+	return input.ProbeError == nil &&
+		input.Probe != nil &&
+		input.Probe.Delivered
 }
 
 func ovnTraceHasOutput(trace string) bool {

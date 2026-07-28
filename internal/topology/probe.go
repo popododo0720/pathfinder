@@ -13,6 +13,8 @@ type ProbeResult struct {
 	DestinationPort      int
 	SourceMAC            string
 	DestinationMAC       string
+	NextHopIP            string
+	NextHopMACSource     string
 	Injected             bool
 	SourceObserved       bool
 	Delivered            bool

@@ -54,6 +54,22 @@ func BuildPacket(
 	path topology.NeutronPath,
 	microflow string,
 ) (Packet, error) {
+	return buildPacket(path, microflow, "")
+}
+
+func BuildPacketWithDestinationMAC(
+	path topology.NeutronPath,
+	microflow string,
+	destinationMACOverride string,
+) (Packet, error) {
+	return buildPacket(path, microflow, destinationMACOverride)
+}
+
+func buildPacket(
+	path topology.NeutronPath,
+	microflow string,
+	destinationMACOverride string,
+) (Packet, error) {
 	sourceIP, destinationIP, err := compatibleIPv4(
 		path.Source.Endpoint.FixedIPs,
 		path.Destination.Endpoint.FixedIPs,
@@ -65,7 +81,11 @@ func BuildPacket(
 	if err != nil {
 		return Packet{}, fmt.Errorf("parse source MAC: %w", err)
 	}
-	destinationMAC, err := packetDestinationMAC(path, microflow)
+	destinationMAC, err := packetDestinationMAC(
+		path,
+		microflow,
+		destinationMACOverride,
+	)
 	if err != nil {
 		return Packet{}, err
 	}
@@ -231,14 +251,19 @@ func compatibleIPv4(
 func packetDestinationMAC(
 	path topology.NeutronPath,
 	microflow string,
+	override string,
 ) (net.HardwareAddr, error) {
-	value := ""
-	if path.Source.Endpoint.SameNetwork(path.Destination.Endpoint) {
+	value := override
+	if value == "" &&
+		path.Source.Endpoint.SameNetwork(path.Destination.Endpoint) {
 		value = path.Destination.Endpoint.MACAddress
-	} else if matches := destinationMACPattern.FindStringSubmatch(
-		microflow,
-	); len(matches) == 2 {
-		value = matches[1]
+	} else if value == "" {
+		matches := destinationMACPattern.FindStringSubmatch(
+			microflow,
+		)
+		if len(matches) == 2 {
+			value = matches[1]
+		}
 	}
 	if value == "" {
 		return nil, fmt.Errorf(

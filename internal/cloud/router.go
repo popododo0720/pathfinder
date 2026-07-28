@@ -13,9 +13,11 @@ import (
 )
 
 type routerInterface struct {
-	RouterID string
-	PortID   string
-	SubnetID string
+	RouterID   string
+	PortID     string
+	SubnetID   string
+	IPAddress  string
+	MACAddress string
 }
 
 func getRouter(
@@ -98,9 +100,11 @@ func listRouterInterfacesForSubnet(
 			}
 
 			result = append(result, routerInterface{
-				RouterID: item.DeviceID,
-				PortID:   item.ID,
-				SubnetID: subnetID,
+				RouterID:   item.DeviceID,
+				PortID:     item.ID,
+				SubnetID:   subnetID,
+				IPAddress:  fixedIP.IPAddress,
+				MACAddress: item.MACAddress,
 			})
 		}
 	}
@@ -158,6 +162,15 @@ func DiscoverRouters(
 			router.InterfaceSubnets = append(
 				router.InterfaceSubnets,
 				routerInterface.SubnetID,
+			)
+			router.Interfaces = append(
+				router.Interfaces,
+				topology.RouterInterface{
+					PortID:     routerInterface.PortID,
+					SubnetID:   routerInterface.SubnetID,
+					IPAddress:  routerInterface.IPAddress,
+					MACAddress: routerInterface.MACAddress,
+				},
 			)
 		}
 

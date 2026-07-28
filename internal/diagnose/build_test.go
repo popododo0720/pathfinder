@@ -68,9 +68,27 @@ func TestBuildLiveProbeVerifiesExternalPhysicalPath(t *testing.T) {
 		ReplyObserved: true,
 		Marker:        "icmp-id:42",
 	}
+	ovsPath := topology.OVSPath{
+		Source: topology.OVSEndpoint{
+			Host:      "stack1",
+			Interface: "tap-source",
+			OFPort:    1,
+			LinkState: "up",
+		},
+		Destination: topology.OVSEndpoint{
+			Host:      "stack2",
+			Interface: "tap-destination",
+			OFPort:    2,
+			LinkState: "up",
+		},
+		Flow:  "icmp,nw_src=192.168.0.78,nw_dst=192.168.55.148",
+		Trace: "Datapath actions: output:2",
+	}
 
 	result := Build(Input{
 		Neutron:        path,
+		OVS:            &ovsPath,
+		OVSRequested:   true,
 		Probe:          &probe,
 		ProbeRequested: true,
 		Microflow:      "icmp",

@@ -119,6 +119,22 @@ func TestBuildPacketUsesExplicitNextHopMAC(t *testing.T) {
 	}
 }
 
+func TestBuildPacketUsesResolvedNextHopMAC(t *testing.T) {
+	t.Parallel()
+
+	packet, err := BuildPacketWithDestinationMAC(
+		testPath("source-network", "destination-network"),
+		"icmp",
+		"00:11:22:33:44:55",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if packet.DestinationMAC.String() != "00:11:22:33:44:55" {
+		t.Fatalf("DestinationMAC = %s", packet.DestinationMAC)
+	}
+}
+
 func testPath(
 	sourceNetwork string,
 	destinationNetwork string,
