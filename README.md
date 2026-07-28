@@ -8,9 +8,7 @@ sending a packet. It correlates:
 - OVN Northbound/Southbound state and `ovn-trace`
 - Compute-host OVS interfaces and `ovs-appctl ofproto/trace`
 - A compact path graph with PASS, WARN, FAIL, and UNKNOWN findings
-
-The TUI is intentionally not implemented yet. The current interface is the
-`pf plan` command.
+- An interactive TUI for navigating the path and raw OVN/OVS traces
 
 ## Build
 
@@ -84,6 +82,40 @@ verdict is FAIL.
 `--host-map` translates Neutron's `binding:host_id` into an SSH address. It
 can be omitted when those host names already resolve through DNS or SSH
 configuration.
+
+## TUI
+
+The TUI accepts the same discovery options as `plan`:
+
+```sh
+pf tui \
+  --minimal \
+  --ovn-host 192.0.2.11 \
+  --ovs \
+  --host-map compute1=192.0.2.21 \
+  --host-map compute2=192.0.2.22 \
+  SOURCE_PORT_ID \
+  DESTINATION_PORT_ID \
+  'tcp.dst == 443'
+```
+
+Keyboard controls:
+
+| Key | Action |
+| --- | --- |
+| `1`, `2`, `3` | Open Path, OVN Trace, or OVS Trace |
+| `h`, `l`, `Tab`, arrows | Switch tabs |
+| `j`, `k`, arrows | Select a path hop or scroll a trace |
+| `g`, `G` | Move to the top or bottom |
+| `r` | Run the analysis again |
+| `q`, `Ctrl-C` | Quit |
+
+The layout automatically switches to a compact one-line-per-hop view on
+small terminals.
+
+SSH control connections are reused for 60 seconds, and OVN and OVS
+observations run concurrently. A rerun from the TUI therefore avoids most
+SSH handshake overhead.
 
 ## Trace limits
 
