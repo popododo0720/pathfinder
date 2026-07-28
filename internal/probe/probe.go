@@ -24,6 +24,9 @@ func Run(
 	if deliveryTimeout <= 0 {
 		deliveryTimeout = defaultDeliveryTimeout
 	}
+	if err := ValidatePath(neutronPath); err != nil {
+		return topology.ProbeResult{}, err
+	}
 
 	packet, err := BuildPacket(neutronPath, microflow)
 	if err != nil {

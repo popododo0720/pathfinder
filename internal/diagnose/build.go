@@ -21,7 +21,7 @@ func Build(input Input) Report {
 	)
 	builder.addHop(Hop{
 		ID:     "source-vm",
-		Label:  endpointLabel("source VM", input.Neutron.Source.Endpoint),
+		Label:  endpointLabel("source", input.Neutron.Source.Endpoint),
 		Status: sourceVMStatus,
 		Detail: sourceVMDetail,
 	})
@@ -151,7 +151,7 @@ func Build(input Input) Report {
 	builder.addHop(Hop{
 		ID: "destination-vm",
 		Label: endpointLabel(
-			"destination VM",
+			"destination",
 			input.Neutron.Destination.Endpoint,
 		),
 		Status: destinationVMStatus,
@@ -289,21 +289,33 @@ func endpointStatus(endpoint topology.Endpoint) (Status, string) {
 	switch {
 	case endpoint.Status != "ACTIVE":
 		return StatusFail, "Neutron port status is " + endpoint.Status
+	case endpoint.DeviceOwner != "" &&
+		!strings.HasPrefix(endpoint.DeviceOwner, "compute:"):
+		return StatusFail, fmt.Sprintf(
+			"Neutron port owner=%s is not a VM compute port",
+			endpoint.DeviceOwner,
+		)
 	case endpoint.HostID == "":
 		return StatusFail, "Neutron port has no host binding"
 	case endpoint.VIFType == "binding_failed":
 		return StatusFail, "Neutron VIF binding failed"
 	default:
 		return StatusPass, fmt.Sprintf(
-			"ACTIVE on %s, vif=%s",
+			"ACTIVE on %s, owner=%s, vif=%s",
 			endpoint.HostID,
+			endpoint.DeviceOwner,
 			endpoint.VIFType,
 		)
 	}
 }
 
-func endpointLabel(prefix string, endpoint topology.Endpoint) string {
-	return fmt.Sprintf("%s %s", prefix, endpoint.PortID)
+func endpointLabel(role string, endpoint topology.Endpoint) string {
+	kind := "VM"
+	if endpoint.DeviceOwner != "" &&
+		!strings.HasPrefix(endpoint.DeviceOwner, "compute:") {
+		kind = "Neutron service port (" + endpoint.DeviceOwner + ")"
+	}
+	return fmt.Sprintf("%s %s %s", role, kind, endpoint.PortID)
 }
 
 func observedOVSEndpoint(

@@ -307,12 +307,14 @@ func testNeutronPath(
 	) topology.EndpointContext {
 		return topology.EndpointContext{
 			Endpoint: topology.Endpoint{
-				PortID:     portID,
-				Status:     "ACTIVE",
-				HostID:     host,
-				VIFType:    "ovs",
-				NetworkID:  network,
-				MACAddress: "fa:16:3e:00:00:01",
+				PortID:      portID,
+				Status:      "ACTIVE",
+				DeviceID:    "server-" + portID,
+				DeviceOwner: "compute:nova",
+				HostID:      host,
+				VIFType:     "ovs",
+				NetworkID:   network,
+				MACAddress:  "fa:16:3e:00:00:01",
 				FixedIPs: []topology.FixedIP{
 					{
 						Address:  address,

@@ -81,9 +81,14 @@ func testPath(
 	return topology.NeutronPath{
 		Source: topology.EndpointContext{
 			Endpoint: topology.Endpoint{
-				PortID:     "source",
-				NetworkID:  sourceNetwork,
-				MACAddress: "fa:16:3e:00:00:01",
+				PortID:      "source",
+				NetworkID:   sourceNetwork,
+				MACAddress:  "fa:16:3e:00:00:01",
+				Status:      "ACTIVE",
+				DeviceID:    "source-server",
+				DeviceOwner: "compute:nova",
+				HostID:      "stack1",
+				VIFType:     "ovs",
 				FixedIPs: []topology.FixedIP{
 					{Address: "192.0.2.10"},
 				},
@@ -91,9 +96,14 @@ func testPath(
 		},
 		Destination: topology.EndpointContext{
 			Endpoint: topology.Endpoint{
-				PortID:     "destination",
-				NetworkID:  destinationNetwork,
-				MACAddress: "fa:16:3e:00:00:02",
+				PortID:      "destination",
+				NetworkID:   destinationNetwork,
+				MACAddress:  "fa:16:3e:00:00:02",
+				Status:      "ACTIVE",
+				DeviceID:    "destination-server",
+				DeviceOwner: "compute:nova",
+				HostID:      "stack2",
+				VIFType:     "ovs",
 				FixedIPs: []topology.FixedIP{
 					{Address: "192.0.2.20"},
 				},
