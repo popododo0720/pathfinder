@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"pathfinder/internal/cloud"
+	"pathfinder/internal/diagnose"
 	"pathfinder/internal/execx"
 	"pathfinder/internal/ovn"
 	"pathfinder/internal/ovs"
 	"pathfinder/internal/report"
+	"pathfinder/internal/topology"
 
 	"github.com/spf13/cobra"
 )
@@ -91,6 +93,8 @@ func newPlanCommand() *cobra.Command {
 				)
 			}
 
+			var ovnObservation *topology.OVNPath
+			var ovnObservationError error
 			if ovnHost == "" {
 				fmt.Fprintln(
 					writer,
@@ -122,77 +126,127 @@ func newPlanCommand() *cobra.Command {
 					minimal,
 				)
 				if err != nil {
-					return fmt.Errorf("discover OVN path: %w", err)
-				}
-				if err := report.WriteOVN(writer, ovnPath); err != nil {
-					return fmt.Errorf("write OVN report: %w", err)
+					ovnObservationError = fmt.Errorf(
+						"discover OVN path: %w",
+						err,
+					)
+					fmt.Fprintf(
+						writer,
+						"ovn: error: %v\n",
+						ovnObservationError,
+					)
+				} else {
+					ovnObservation = &ovnPath
+					if err := report.WriteOVN(
+						writer,
+						ovnPath,
+					); err != nil {
+						return fmt.Errorf(
+							"write OVN report: %w",
+							err,
+						)
+					}
 				}
 			}
 
+			var ovsObservation *topology.OVSPath
+			var ovsObservationError error
 			if !enableOVS {
 				fmt.Fprintln(writer, "ovs: skipped (set --ovs)")
-				return nil
-			}
-
-			mappings, err := execx.ParseHostMappings(hostMappings)
-			if err != nil {
-				return err
-			}
-			sourceHost := execx.ResolveHost(
-				path.Source.Endpoint.HostID,
-				mappings,
-			)
-			destinationHost := execx.ResolveHost(
-				path.Destination.Endpoint.HostID,
-				mappings,
-			)
-			if sourceHost == "" || destinationHost == "" {
-				return fmt.Errorf(
-					"OVS trace requires both Neutron ports to have a host binding",
+			} else {
+				mappings, err := execx.ParseHostMappings(hostMappings)
+				if err != nil {
+					return err
+				}
+				sourceHost := execx.ResolveHost(
+					path.Source.Endpoint.HostID,
+					mappings,
 				)
+				destinationHost := execx.ResolveHost(
+					path.Destination.Endpoint.HostID,
+					mappings,
+				)
+				if sourceHost == "" || destinationHost == "" {
+					ovsObservationError = fmt.Errorf(
+						"OVS trace requires both Neutron ports to have a host binding",
+					)
+				} else {
+					runner := execx.SystemRunner{
+						SSH: execx.SSHConfig{
+							User:         sshUser,
+							Port:         sshPort,
+							IdentityFile: sshKey,
+							Password: os.Getenv(
+								"PF_SSH_PASSWORD",
+							),
+							StrictHostKey: sshStrictHostKey,
+						},
+					}
+					sourceOVSClient := ovs.NewClient(
+						runner,
+						ovs.Config{
+							Host:            sourceHost,
+							ContainerEngine: containerEngine,
+							Container:       ovsContainer,
+							Bridge:          integrationBridge,
+						},
+					)
+					destinationOVSClient := ovs.NewClient(
+						runner,
+						ovs.Config{
+							Host:            destinationHost,
+							ContainerEngine: containerEngine,
+							Container:       ovsContainer,
+							Bridge:          integrationBridge,
+						},
+					)
+					ovsPath, err := ovs.DiscoverPath(
+						ctx,
+						sourceOVSClient,
+						destinationOVSClient,
+						path,
+						microflow,
+					)
+					if err != nil {
+						ovsObservationError = fmt.Errorf(
+							"discover OVS path: %w",
+							err,
+						)
+					} else {
+						ovsObservation = &ovsPath
+						if err := report.WriteOVS(
+							writer,
+							ovsPath,
+						); err != nil {
+							return fmt.Errorf(
+								"write OVS report: %w",
+								err,
+							)
+						}
+					}
+				}
+				if ovsObservationError != nil {
+					fmt.Fprintf(
+						writer,
+						"ovs: error: %v\n",
+						ovsObservationError,
+					)
+				}
 			}
 
-			runner := execx.SystemRunner{
-				SSH: execx.SSHConfig{
-					User:          sshUser,
-					Port:          sshPort,
-					IdentityFile:  sshKey,
-					Password:      os.Getenv("PF_SSH_PASSWORD"),
-					StrictHostKey: sshStrictHostKey,
-				},
+			diagnosis := diagnose.Build(diagnose.Input{
+				Neutron:      path,
+				OVN:          ovnObservation,
+				OVNRequested: ovnHost != "",
+				OVNError:     ovnObservationError,
+				OVS:          ovsObservation,
+				OVSRequested: enableOVS,
+				OVSError:     ovsObservationError,
+				Microflow:    microflow,
+			})
+			if err := report.WriteDiagnosis(writer, diagnosis); err != nil {
+				return fmt.Errorf("write path diagnosis: %w", err)
 			}
-			sourceOVSClient := ovs.NewClient(
-				runner,
-				ovs.Config{
-					Host:            sourceHost,
-					ContainerEngine: containerEngine,
-					Container:       ovsContainer,
-					Bridge:          integrationBridge,
-				},
-			)
-			destinationOVSClient := ovs.NewClient(
-				runner,
-				ovs.Config{
-					Host:            destinationHost,
-					ContainerEngine: containerEngine,
-					Container:       ovsContainer,
-					Bridge:          integrationBridge,
-				},
-			)
-			ovsPath, err := ovs.DiscoverPath(
-				ctx,
-				sourceOVSClient,
-				destinationOVSClient,
-				path,
-				microflow,
-			)
-			if err != nil {
-				return fmt.Errorf("discover OVS path: %w", err)
-			}
-			if err := report.WriteOVS(writer, ovsPath); err != nil {
-				return fmt.Errorf("write OVS report: %w", err)
-			}
-
 			return nil
 		},
 	}
