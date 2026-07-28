@@ -75,6 +75,15 @@ func Build(input Input) Report {
 	}
 
 	routeStatus, routeLabel, routeDetail := routeStatus(input.Neutron)
+	if routeStatus == StatusWarning &&
+		input.ProbeError == nil &&
+		input.Probe != nil &&
+		input.Probe.Injected &&
+		input.Probe.Delivered {
+		routeStatus = StatusPass
+		routeLabel = "external physical path (live verified)"
+		routeDetail += "; live probe confirmed end-to-end delivery"
+	}
 	builder.addHop(Hop{
 		ID:     "transport",
 		Label:  routeLabel,

@@ -48,6 +48,52 @@ func TestBuildExternalNetworksWarnsAboutVisibilityBoundary(
 	}
 }
 
+func TestBuildLiveProbeVerifiesExternalPhysicalPath(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("source-network", "destination-network")
+	path.Source.Network.External = true
+	path.Source.Network.PhysicalNetwork = "external"
+	path.Source.Network.SegmentationID = "192"
+	path.Destination.Network.External = true
+	path.Destination.Network.PhysicalNetwork = "external"
+	path.Destination.Network.SegmentationID = "55"
+	probe := topology.ProbeResult{
+		Protocol:            "icmp",
+		SourceIP:            "192.168.0.78",
+		DestinationIP:       "192.168.55.148",
+		DestinationTXBefore: 100,
+		DestinationTXAfter:  101,
+		DestinationTXDelta:  1,
+		Injected:            true,
+		Delivered:           true,
+	}
+
+	result := Build(Input{
+		Neutron:        path,
+		Probe:          &probe,
+		ProbeRequested: true,
+		Microflow:      "icmp",
+	})
+
+	if result.Verdict != StatusPass {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	if !hasHop(result, "transport", StatusPass) {
+		t.Fatalf("verified transport hop not found: %v", result.Hops)
+	}
+	if hasFinding(result, "transport", StatusWarning) {
+		t.Fatalf(
+			"verified transport still has a warning: %v",
+			result.Findings,
+		)
+	}
+}
+
 func TestBuildFailsWhenNoRouteExists(t *testing.T) {
 	t.Parallel()
 
