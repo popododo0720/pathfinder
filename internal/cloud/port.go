@@ -7,12 +7,14 @@ import (
 
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/portsbinding"
+	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/qos/policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/ports"
 )
 
 type neutronPort struct {
 	ports.Port
 	portsbinding.PortsBindingExt
+	policies.QoSPolicyExt
 }
 
 func getPort(
@@ -50,16 +52,19 @@ func GetEndpoint(
 	}
 
 	return topology.Endpoint{
-		PortID:      port.ID,
-		Name:        port.Name,
-		Status:      port.Status,
-		MACAddress:  port.MACAddress,
-		NetworkID:   port.NetworkID,
-		DeviceID:    port.DeviceID,
-		DeviceOwner: port.DeviceOwner,
-		HostID:      port.HostID,
-		VIFType:     port.VIFType,
-		VNICType:    port.VNICType,
-		FixedIPs:    fixedIPs,
+		PortID:           port.ID,
+		ProjectID:        port.ProjectID,
+		Name:             port.Name,
+		Status:           port.Status,
+		MACAddress:       port.MACAddress,
+		NetworkID:        port.NetworkID,
+		DeviceID:         port.DeviceID,
+		DeviceOwner:      port.DeviceOwner,
+		HostID:           port.HostID,
+		VIFType:          port.VIFType,
+		VNICType:         port.VNICType,
+		QoSPolicyID:      port.QoSPolicyID,
+		SecurityGroupIDs: append([]string(nil), port.SecurityGroups...),
+		FixedIPs:         fixedIPs,
 	}, nil
 }

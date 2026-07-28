@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"pathfinder/internal/cloud"
+	"pathfinder/internal/report"
 
 	"github.com/spf13/cobra"
 )
@@ -37,151 +38,29 @@ func newPlanCommand() *cobra.Command {
 				return fmt.Errorf("create Neutron client: %w", err)
 			}
 
-			sourceEndpoint, err := cloud.GetEndpoint(ctx, networkClient, source)
-			if err != nil {
-				return fmt.Errorf("get source port %q: %w", source, err)
-			}
-
-			destinationEndpoint, err := cloud.GetEndpoint(ctx, networkClient, destination)
-			if err != nil {
-				return fmt.Errorf("get destination port %q: %w", destination, err)
-			}
-
-			sameNetwork := sourceEndpoint.SameNetwork(destinationEndpoint)
-
-			sourceNetwork, err := cloud.GetNetwork(
+			path, err := cloud.DiscoverNeutronPath(
 				ctx,
 				networkClient,
-				sourceEndpoint.NetworkID,
+				source,
+				destination,
 			)
 			if err != nil {
-				return fmt.Errorf(
-					"get source network %q: %w",
-					sourceEndpoint.NetworkID,
-					err,
-				)
+				return err
 			}
 
-			destinationNetwork := sourceNetwork
-			if !sameNetwork {
-				destinationNetwork, err = cloud.GetNetwork(
-					ctx,
-					networkClient,
-					destinationEndpoint.NetworkID,
-				)
-				if err != nil {
-					return fmt.Errorf(
-						"get destination network %q: %w",
-						destinationEndpoint.NetworkID,
-						err,
-					)
-				}
+			if err := report.WriteNeutron(
+				command.OutOrStdout(),
+				path,
+			); err != nil {
+				return fmt.Errorf("write report: %w", err)
 			}
 
-			command.Printf("source ID: %s\n", sourceEndpoint.PortID)
-			command.Printf("source name: %s\n", sourceEndpoint.Name)
-			command.Printf("source status: %s\n", sourceEndpoint.Status)
-			command.Printf("source MAC: %s\n", sourceEndpoint.MACAddress)
-			command.Printf("source network ID: %s\n", sourceNetwork.ID)
-			command.Printf("source network name: %s\n", sourceNetwork.Name)
-			command.Printf("source network status: %s\n", sourceNetwork.Status)
-			command.Printf("source network external: %t\n", sourceNetwork.External)
-			command.Printf("source network type: %s\n", sourceNetwork.NetworkType)
-			command.Printf(
-				"source physical network: %s\n",
-				sourceNetwork.PhysicalNetwork,
-			)
-			command.Printf(
-				"source segmentation ID: %s\n",
-				sourceNetwork.SegmentationID,
-			)
-			command.Printf("source MTU: %d\n", sourceNetwork.MTU)
-			for index, fixedIP := range sourceEndpoint.FixedIPs {
-				command.Printf(
-					"source fixed IP[%d]: %s (subnet: %s)\n",
-					index,
-					fixedIP.Address,
-					fixedIP.SubnetID,
-				)
-			}
-			command.Printf("source device owner: %s\n", sourceEndpoint.DeviceOwner)
-			command.Printf("source device ID: %s\n", sourceEndpoint.DeviceID)
-			command.Printf("source host ID: %s\n", sourceEndpoint.HostID)
-			command.Printf("source VIF type: %s\n", sourceEndpoint.VIFType)
-			command.Printf("source VNIC type: %s\n", sourceEndpoint.VNICType)
-			command.Printf("destination ID: %s\n", destinationEndpoint.PortID)
-			command.Printf("destination name: %s\n", destinationEndpoint.Name)
-			command.Printf("destination status: %s\n", destinationEndpoint.Status)
-			command.Printf("destination MAC: %s\n", destinationEndpoint.MACAddress)
-			command.Printf(
-				"destination network ID: %s\n",
-				destinationNetwork.ID,
-			)
-			command.Printf(
-				"destination network name: %s\n",
-				destinationNetwork.Name,
-			)
-			command.Printf(
-				"destination network status: %s\n",
-				destinationNetwork.Status,
-			)
-			command.Printf(
-				"destination network external: %t\n",
-				destinationNetwork.External,
-			)
-			command.Printf(
-				"destination network type: %s\n",
-				destinationNetwork.NetworkType,
-			)
-			command.Printf(
-				"destination physical network: %s\n",
-				destinationNetwork.PhysicalNetwork,
-			)
-			command.Printf(
-				"destination segmentation ID: %s\n",
-				destinationNetwork.SegmentationID,
-			)
-			command.Printf(
-				"destination MTU: %d\n",
-				destinationNetwork.MTU,
-			)
-
-			for index, fixedIP := range destinationEndpoint.FixedIPs {
-				command.Printf(
-					"destination fixed IP[%d]: %s (subnet: %s)\n",
-					index,
-					fixedIP.Address,
-					fixedIP.SubnetID,
-				)
-			}
-			command.Printf(
-				"destination device owner: %s\n",
-				destinationEndpoint.DeviceOwner,
-			)
-			command.Printf(
-				"destination device ID: %s\n",
-				destinationEndpoint.DeviceID,
-			)
-			command.Printf(
-				"destination host ID: %s\n",
-				destinationEndpoint.HostID,
-			)
-			command.Printf(
-				"destination VIF type: %s\n",
-				destinationEndpoint.VIFType,
-			)
-			command.Printf(
-				"destination VNIC type: %s\n",
-				destinationEndpoint.VNICType,
-			)
 			command.Printf("microflow: %s\n", microflow)
 			command.Printf("minimal: %t\n", minimal)
 
 			for index, state := range connectionStates {
 				command.Printf("ct[%d]: %s\n", index, state)
 			}
-
-			command.Printf("same network: %t\n", sameNetwork)
 
 			return nil
 		},

@@ -9,6 +9,7 @@ import (
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/external"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/mtu"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/provider"
+	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/extensions/qos/policies"
 	"github.com/gophercloud/gophercloud/v2/openstack/networking/v2/networks"
 )
 
@@ -17,6 +18,7 @@ type neutronNetwork struct {
 	external.NetworkExternalExt
 	mtu.NetworkMTUExt
 	provider.NetworkProviderExt
+	policies.QoSPolicyExt
 }
 
 func GetNetwork(
@@ -33,6 +35,7 @@ func GetNetwork(
 
 	return topology.Network{
 		ID:              network.ID,
+		ProjectID:       network.ProjectID,
 		Name:            network.Name,
 		Status:          network.Status,
 		External:        network.External,
@@ -40,6 +43,7 @@ func GetNetwork(
 		NetworkType:     network.NetworkType,
 		PhysicalNetwork: network.PhysicalNetwork,
 		SegmentationID:  network.SegmentationID,
-		SubnetIDs:       network.Subnets,
+		QoSPolicyID:     network.QoSPolicyID,
+		SubnetIDs:       append([]string(nil), network.Subnets...),
 	}, nil
 }
