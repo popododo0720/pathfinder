@@ -11,6 +11,7 @@ import (
 	"pathfinder/internal/execx"
 	"pathfinder/internal/ovn"
 	"pathfinder/internal/ovs"
+	"pathfinder/internal/probe"
 	"pathfinder/internal/topology"
 )
 
@@ -20,6 +21,8 @@ type Options struct {
 	Microflow         string
 	ConnectionStates  []string
 	Minimal           bool
+	PlanOnly          bool
+	ProbeTimeout      time.Duration
 
 	OVNHost           string
 	EnableOVS         bool
@@ -36,6 +39,7 @@ type Timings struct {
 	Neutron time.Duration
 	OVN     time.Duration
 	OVS     time.Duration
+	Probe   time.Duration
 	Total   time.Duration
 }
 
@@ -50,6 +54,10 @@ type Result struct {
 	OVSRequested bool
 	OVSError     error
 
+	Probe          *topology.ProbeResult
+	ProbeRequested bool
+	ProbeError     error
+
 	Diagnosis diagnose.Report
 	Timings   Timings
 }
@@ -57,8 +65,9 @@ type Result struct {
 func Analyze(ctx context.Context, options Options) (Result, error) {
 	started := time.Now()
 	result := Result{
-		OVNRequested: options.OVNHost != "",
-		OVSRequested: options.EnableOVS,
+		OVNRequested:   options.OVNHost != "",
+		OVSRequested:   options.EnableOVS,
+		ProbeRequested: !options.PlanOnly,
 	}
 
 	neutronStarted := time.Now()
@@ -122,19 +131,79 @@ func Analyze(ctx context.Context, options Options) (Result, error) {
 		result.OVSError = ovsObservation.err
 		result.Timings.OVS = ovsObservation.duration
 	}
+	if result.ProbeRequested {
+		probeObservation := analyzeProbe(
+			ctx,
+			runner,
+			result.Neutron,
+			result.OVS,
+			options,
+		)
+		result.Probe = probeObservation.value
+		result.ProbeError = probeObservation.err
+		result.Timings.Probe = probeObservation.duration
+	}
 
 	result.Diagnosis = diagnose.Build(diagnose.Input{
-		Neutron:      result.Neutron,
-		OVN:          result.OVN,
-		OVNRequested: result.OVNRequested,
-		OVNError:     result.OVNError,
-		OVS:          result.OVS,
-		OVSRequested: result.OVSRequested,
-		OVSError:     result.OVSError,
-		Microflow:    options.Microflow,
+		Neutron:        result.Neutron,
+		OVN:            result.OVN,
+		OVNRequested:   result.OVNRequested,
+		OVNError:       result.OVNError,
+		OVS:            result.OVS,
+		OVSRequested:   result.OVSRequested,
+		OVSError:       result.OVSError,
+		Probe:          result.Probe,
+		ProbeRequested: result.ProbeRequested,
+		ProbeError:     result.ProbeError,
+		Microflow:      options.Microflow,
 	})
 	result.Timings.Total = time.Since(started)
 	return result, nil
+}
+
+func analyzeProbe(
+	ctx context.Context,
+	runner execx.Runner,
+	path topology.NeutronPath,
+	ovsPath *topology.OVSPath,
+	options Options,
+) observation[topology.ProbeResult] {
+	started := time.Now()
+	result := observation[topology.ProbeResult]{}
+	if ovsPath == nil {
+		result.err = fmt.Errorf(
+			"live probe requires successful OVS discovery",
+		)
+		result.duration = time.Since(started)
+		return result
+	}
+
+	sourceClient, destinationClient, err := ovsClients(
+		runner,
+		path,
+		options,
+	)
+	if err != nil {
+		result.err = err
+		result.duration = time.Since(started)
+		return result
+	}
+	probeResult, err := probe.Run(
+		ctx,
+		sourceClient,
+		destinationClient,
+		path,
+		*ovsPath,
+		options.Microflow,
+		options.ProbeTimeout,
+	)
+	result.duration = time.Since(started)
+	if err != nil {
+		result.err = fmt.Errorf("run live probe: %w", err)
+		return result
+	}
+	result.value = &probeResult
+	return result
 }
 
 type observation[T any] struct {
@@ -183,6 +252,38 @@ func analyzeOVS(
 	options Options,
 ) observation[topology.OVSPath] {
 	started := time.Now()
+	observationResult := observation[topology.OVSPath]{}
+	sourceClient, destinationClient, err := ovsClients(
+		runner,
+		path,
+		options,
+	)
+	if err != nil {
+		observationResult.err = err
+		observationResult.duration = time.Since(started)
+		return observationResult
+	}
+	pathResult, err := ovs.DiscoverPath(
+		ctx,
+		sourceClient,
+		destinationClient,
+		path,
+		options.Microflow,
+	)
+	observationResult.duration = time.Since(started)
+	if err != nil {
+		observationResult.err = fmt.Errorf("discover OVS path: %w", err)
+		return observationResult
+	}
+	observationResult.value = &pathResult
+	return observationResult
+}
+
+func ovsClients(
+	runner execx.Runner,
+	path topology.NeutronPath,
+	options Options,
+) (*ovs.Client, *ovs.Client, error) {
 	sourceHost := execx.ResolveHost(
 		path.Source.Endpoint.HostID,
 		options.HostMappings,
@@ -191,15 +292,11 @@ func analyzeOVS(
 		path.Destination.Endpoint.HostID,
 		options.HostMappings,
 	)
-	observationResult := observation[topology.OVSPath]{}
 	if sourceHost == "" || destinationHost == "" {
-		observationResult.err = fmt.Errorf(
-			"OVS trace requires both Neutron ports to have a host binding",
+		return nil, nil, fmt.Errorf(
+			"OVS operation requires both Neutron ports to have a host binding",
 		)
-		observationResult.duration = time.Since(started)
-		return observationResult
 	}
-
 	sourceClient := ovs.NewClient(
 		runner,
 		ovs.Config{
@@ -218,18 +315,5 @@ func analyzeOVS(
 			Bridge:          options.IntegrationBridge,
 		},
 	)
-	pathResult, err := ovs.DiscoverPath(
-		ctx,
-		sourceClient,
-		destinationClient,
-		path,
-		options.Microflow,
-	)
-	observationResult.duration = time.Since(started)
-	if err != nil {
-		observationResult.err = fmt.Errorf("discover OVS path: %w", err)
-		return observationResult
-	}
-	observationResult.value = &pathResult
-	return observationResult
+	return sourceClient, destinationClient, nil
 }

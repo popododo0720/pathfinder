@@ -1,0 +1,92 @@
+package probe
+
+import (
+	"context"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"pathfinder/internal/execx"
+	"pathfinder/internal/ovs"
+	"pathfinder/internal/topology"
+)
+
+type probeRunner struct {
+	mu          sync.Mutex
+	counterRead int
+	commands    []string
+}
+
+func (runner *probeRunner) Run(
+	_ context.Context,
+	host string,
+	name string,
+	args ...string,
+) (execx.Result, error) {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	command := host + "|" + name + "|" + strings.Join(args, " ")
+	runner.commands = append(runner.commands, command)
+	if strings.Contains(command, "statistics:tx_packets") {
+		runner.counterRead++
+		if runner.counterRead == 1 {
+			return execx.Result{Stdout: "10\n"}, nil
+		}
+		return execx.Result{Stdout: "11\n"}, nil
+	}
+	return execx.Result{}, nil
+}
+
+func TestRunInjectsAndDetectsDelivery(t *testing.T) {
+	t.Parallel()
+
+	runner := &probeRunner{}
+	sourceClient := ovs.NewClient(
+		runner,
+		ovs.Config{Host: "source-host", Container: "ovs"},
+	)
+	destinationClient := ovs.NewClient(
+		runner,
+		ovs.Config{Host: "destination-host", Container: "ovs"},
+	)
+	result, err := Run(
+		context.Background(),
+		sourceClient,
+		destinationClient,
+		testPath("network", "network"),
+		topology.OVSPath{
+			Source: topology.OVSEndpoint{
+				Interface: "tap-source",
+				OFPort:    7,
+			},
+			Destination: topology.OVSEndpoint{
+				Interface: "tap-destination",
+				OFPort:    8,
+			},
+		},
+		"udp.dst == 53",
+		time.Second,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Injected || !result.Delivered {
+		t.Fatalf("probe result = %+v", result)
+	}
+	if result.DestinationTXDelta != 1 {
+		t.Fatalf("DestinationTXDelta = %d", result.DestinationTXDelta)
+	}
+
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	foundPacketOut := false
+	for _, command := range runner.commands {
+		if strings.Contains(command, "ovs-ofctl packet-out") {
+			foundPacketOut = true
+		}
+	}
+	if !foundPacketOut {
+		t.Fatalf("packet-out command was not executed: %v", runner.commands)
+	}
+}

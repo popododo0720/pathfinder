@@ -154,11 +154,60 @@ func Build(input Input) Report {
 		"port delivery",
 		destinationVMStatus,
 	)
+	if input.Probe != nil || input.ProbeRequested {
+		probeStatus, probeDetail := observedProbe(
+			input.Probe,
+			input.ProbeError,
+		)
+		builder.addHop(Hop{
+			ID:     "live-probe",
+			Label:  "live packet delivery",
+			Status: probeStatus,
+			Detail: probeDetail,
+		})
+		builder.addLink(
+			"destination-vm",
+			"live-probe",
+			"end-to-end verification",
+			probeStatus,
+		)
+	}
 
 	builder.addTraceFindings(input)
 	builder.addNetworkFindings(input.Neutron)
 	builder.addMTUFinding(input.Neutron)
 	return builder.report()
+}
+
+func observedProbe(
+	probe *topology.ProbeResult,
+	observationError error,
+) (Status, string) {
+	if observationError != nil {
+		return StatusFail, observationError.Error()
+	}
+	if probe == nil {
+		return StatusUnknown, "live probe did not return a result"
+	}
+	if !probe.Injected {
+		return StatusFail, "packet was not injected"
+	}
+	if !probe.Delivered {
+		return StatusFail, fmt.Sprintf(
+			"packet injected but destination tap tx_packets did not increase (%d -> %d)",
+			probe.DestinationTXBefore,
+			probe.DestinationTXAfter,
+		)
+	}
+	return StatusPass, fmt.Sprintf(
+		"%s %s:%d -> %s:%d delivered; destination tx_packets +%d",
+		probe.Protocol,
+		probe.SourceIP,
+		probe.SourcePort,
+		probe.DestinationIP,
+		probe.DestinationPort,
+		probe.DestinationTXDelta,
+	)
 }
 
 type reportBuilder struct {

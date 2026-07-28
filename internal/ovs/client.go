@@ -2,6 +2,7 @@ package ovs
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -197,6 +198,51 @@ func (client *Client) Trace(
 		client.config.Bridge,
 		flow,
 	)
+}
+
+func (client *Client) InjectPacket(
+	ctx context.Context,
+	sourceOFPort int,
+	packet []byte,
+) error {
+	_, err := client.run(
+		ctx,
+		"ovs-ofctl",
+		"packet-out",
+		client.config.Bridge,
+		strconv.Itoa(sourceOFPort),
+		"resubmit(,0)",
+		hex.EncodeToString(packet),
+	)
+	return err
+}
+
+func (client *Client) TXPackets(
+	ctx context.Context,
+	interfaceName string,
+) (uint64, error) {
+	value, err := client.vsctl(
+		ctx,
+		"--if-exists",
+		"get",
+		"Interface",
+		interfaceName,
+		"statistics:tx_packets",
+	)
+	if err != nil {
+		return 0, err
+	}
+	value = cleanOVSValue(value)
+	counter, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"parse tx_packets %q for %s: %w",
+			value,
+			interfaceName,
+			err,
+		)
+	}
+	return counter, nil
 }
 
 func (client *Client) vsctl(

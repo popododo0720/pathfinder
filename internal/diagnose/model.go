@@ -39,12 +39,15 @@ type Report struct {
 }
 
 type Input struct {
-	Neutron      topology.NeutronPath
-	OVN          *topology.OVNPath
-	OVNRequested bool
-	OVNError     error
-	OVS          *topology.OVSPath
-	OVSRequested bool
-	OVSError     error
-	Microflow    string
+	Neutron        topology.NeutronPath
+	OVN            *topology.OVNPath
+	OVNRequested   bool
+	OVNError       error
+	OVS            *topology.OVSPath
+	OVSRequested   bool
+	OVSError       error
+	Probe          *topology.ProbeResult
+	ProbeRequested bool
+	ProbeError     error
+	Microflow      string
 }

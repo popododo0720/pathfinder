@@ -168,12 +168,79 @@ func TestBuildUsesFinalOVSDatapathAction(t *testing.T) {
 	}
 }
 
+func TestBuildReportsDeliveredLiveProbe(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	probe := topology.ProbeResult{
+		Protocol:            "tcp",
+		SourceIP:            "192.0.2.10",
+		DestinationIP:       "192.0.2.20",
+		SourcePort:          45000,
+		DestinationPort:     443,
+		DestinationTXBefore: 10,
+		DestinationTXAfter:  11,
+		DestinationTXDelta:  1,
+		Injected:            true,
+		Delivered:           true,
+	}
+	result := Build(Input{
+		Neutron:        path,
+		Probe:          &probe,
+		ProbeRequested: true,
+		Microflow:      "tcp.dst == 443",
+	})
+
+	if result.Verdict != StatusPass {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	if !hasHop(result, "live-probe", StatusPass) {
+		t.Fatalf("successful live-probe hop not found: %v", result.Hops)
+	}
+}
+
+func TestBuildFailsWhenLiveProbeIsNotDelivered(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	probe := topology.ProbeResult{
+		Injected:            true,
+		DestinationTXBefore: 10,
+		DestinationTXAfter:  10,
+	}
+	result := Build(Input{
+		Neutron:        path,
+		Probe:          &probe,
+		ProbeRequested: true,
+	})
+
+	if result.Verdict != StatusFail {
+		t.Fatalf("Verdict = %s", result.Verdict)
+	}
+	if !hasHop(result, "live-probe", StatusFail) {
+		t.Fatalf("failed live-probe hop not found: %v", result.Hops)
+	}
+}
+
 func TestOVNMinimalTraceOutputIsRecognized(t *testing.T) {
 	t.Parallel()
 
 	if !ovnTraceHasOutput(`output("port");`) {
 		t.Fatal("minimal ovn-trace output was not recognized")
 	}
+}
+
+func hasHop(report Report, id string, status Status) bool {
+	for _, hop := range report.Hops {
+		if hop.ID == id && hop.Status == status {
+			return true
+		}
+	}
+	return false
 }
 
 func testNeutronPath(
