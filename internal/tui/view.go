@@ -55,9 +55,12 @@ func (model Model) readyView() string {
 			Render(model.viewport.View())
 	}
 
-	help := helpStyle.Render(
-		"1/2/3/4 or h/l: tabs  •  j/k: select/scroll  •  g/G: top/bottom  •  r: rerun  •  q: quit",
-	)
+	helpText := "1/2/3/4 or h/l: tabs  •  j/k: select/scroll  •  " +
+		"g/G: top/bottom  •  r: rerun  •  q: quit"
+	if model.width < 110 {
+		helpText = "h/l tabs  •  j/k move  •  r rerun  •  q quit"
+	}
+	help := helpStyle.Render(helpText)
 	body := lipgloss.JoinVertical(
 		lipgloss.Left,
 		header,
@@ -84,7 +87,7 @@ func (model Model) headerView() string {
 			shortDuration(model.result.Timings.Probe),
 			shortDuration(model.result.Timings.Total),
 		)
-		if model.width < 110 {
+		if model.width < 140 {
 			timing = "Total " +
 				shortDuration(model.result.Timings.Total)
 		}
@@ -126,8 +129,10 @@ func (model Model) tabsView() string {
 }
 
 func (model Model) pathView() string {
-	if model.width < 100 || model.height < 30 {
-		panelWidth := max(model.width-6, 36)
+	availableWidth := max(model.width-4, 1)
+	panelFrame := panelStyle.GetHorizontalFrameSize()
+	if model.width < 150 || model.height < 32 {
+		panelWidth := max(availableWidth-panelFrame, 1)
 		graph := panelStyle.
 			Width(panelWidth).
 			Render(model.compactGraphView())
@@ -137,8 +142,10 @@ func (model Model) pathView() string {
 		return lipgloss.JoinVertical(lipgloss.Left, graph, detail)
 	}
 
-	graphWidth := max((model.width*3)/5, 42)
-	detailWidth := max(model.width-graphWidth-7, 30)
+	graphOuterWidth := (availableWidth * 3) / 5
+	detailOuterWidth := availableWidth - graphOuterWidth - 1
+	graphWidth := max(graphOuterWidth-panelFrame, 1)
+	detailWidth := max(detailOuterWidth-panelFrame, 1)
 
 	graph := panelStyle.
 		Width(graphWidth).
@@ -147,6 +154,19 @@ func (model Model) pathView() string {
 		Width(detailWidth).
 		Render(model.detailView())
 
+	if lipgloss.Width(graph)+1+lipgloss.Width(detail) >
+		availableWidth {
+		panelWidth := max(availableWidth-panelFrame, 1)
+		return lipgloss.JoinVertical(
+			lipgloss.Left,
+			panelStyle.Width(panelWidth).Render(
+				model.compactGraphView(),
+			),
+			panelStyle.Width(panelWidth).Render(
+				model.compactDetailView(),
+			),
+		)
+	}
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		graph,
@@ -160,8 +180,22 @@ func (model Model) compactGraphView() string {
 		return "No graph"
 	}
 
+	hops := model.result.Diagnosis.Hops
+	maxVisible := max(model.height-12, 3)
+	start := 0
+	end := len(hops)
+	if end > maxVisible {
+		start = max(model.selected-maxVisible/2, 0)
+		end = min(start+maxVisible, len(hops))
+		start = max(end-maxVisible, 0)
+	}
+
 	var output strings.Builder
-	for index, hop := range model.result.Diagnosis.Hops {
+	if start > 0 {
+		output.WriteString("  …\n")
+	}
+	for index := start; index < end; index++ {
+		hop := hops[index]
 		prefix := "  "
 		if index == model.selected {
 			prefix = "▶ "
@@ -175,9 +209,12 @@ func (model Model) compactGraphView() string {
 			line = selectedStyle.Render(line)
 		}
 		output.WriteString(line)
-		if index < len(model.result.Diagnosis.Hops)-1 {
+		if index < end-1 {
 			output.WriteByte('\n')
 		}
+	}
+	if end < len(hops) {
+		output.WriteString("\n  …")
 	}
 	return output.String()
 }

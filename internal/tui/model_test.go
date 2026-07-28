@@ -11,6 +11,7 @@ import (
 	"pathfinder/internal/topology"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestModelRendersAndNavigatesPath(t *testing.T) {
@@ -152,6 +153,40 @@ func TestCompactViewFitsStandardTerminal(t *testing.T) {
 			"compact view uses %d lines, want at most 24",
 			lineCount,
 		)
+	}
+}
+
+func TestMediumTerminalDoesNotOverlapPanels(t *testing.T) {
+	t.Parallel()
+
+	model := testModel()
+	result := testResult()
+	for index := 0; index < 10; index++ {
+		result.Diagnosis.Hops = append(
+			result.Diagnosis.Hops,
+			diagnose.Hop{
+				ID:     "extra",
+				Label:  "additional long packet path hop",
+				Status: diagnose.StatusPass,
+				Detail: "detail",
+			},
+		)
+	}
+	model.Update(tea.WindowSizeMsg{Width: 128, Height: 32})
+	model.Update(analysisFinishedMsg{
+		generation: model.generation,
+		result:     result,
+	})
+
+	view := model.View()
+	for _, line := range strings.Split(view, "\n") {
+		if width := lipgloss.Width(line); width > 128 {
+			t.Fatalf(
+				"rendered line width = %d, want <= 128:\n%s",
+				width,
+				line,
+			)
+		}
 	}
 }
 
