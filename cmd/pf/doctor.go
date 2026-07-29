@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"pathfinder/internal/cloud"
 	"pathfinder/internal/doctor"
 	"pathfinder/internal/execx"
 
+	"github.com/gophercloud/gophercloud/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -56,6 +58,21 @@ func runDoctor(
 	ctx, cancel := flags.context(command.Context())
 	defer cancel()
 
+	var (
+		networkClient     *gophercloud.ServiceClient
+		networkClientErr  error
+		networkClientOnce sync.Once
+	)
+	getNetworkClient := func(ctx context.Context) (
+		*gophercloud.ServiceClient,
+		error,
+	) {
+		networkClientOnce.Do(func() {
+			networkClient, networkClientErr = cloud.NewNetworkClient(ctx)
+		})
+		return networkClient, networkClientErr
+	}
+
 	checks := doctor.Run(ctx, doctor.Options{
 		OVNHost:         flags.ovnHost,
 		HostMappings:    mappings,
@@ -70,8 +87,18 @@ func runDoctor(
 			StrictHostKey: flags.sshStrictHostKey,
 		}},
 		CheckOpenStack: func(ctx context.Context) error {
-			_, err := cloud.NewNetworkClient(ctx)
-			return err
+			client, err := getNetworkClient(ctx)
+			if err != nil {
+				return err
+			}
+			return cloud.CheckNetworkReadAccess(ctx, client)
+		},
+		CheckNova: func(ctx context.Context) error {
+			client, err := getNetworkClient(ctx)
+			if err != nil {
+				return err
+			}
+			return cloud.CheckComputeEndpoint(client)
 		},
 	})
 	if err := writeDoctorOutput(

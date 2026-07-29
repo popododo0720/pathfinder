@@ -30,10 +30,22 @@ type Options struct {
 	OVSContainer    string
 	Runner          execx.Runner
 	CheckOpenStack  func(context.Context) error
+	CheckNova       func(context.Context) error
 }
 
 func Run(ctx context.Context, options Options) []Check {
-	checks := []Check{checkOpenStack(ctx, options.CheckOpenStack)}
+	openStackCheck := checkOpenStack(ctx, options.CheckOpenStack)
+	checks := []Check{openStackCheck}
+	if openStackCheck.Status == StatusFail {
+		checks = append(checks, Check{
+			Name:   "Nova endpoint",
+			Status: StatusWarn,
+			Cause: "not checked because OpenStack authentication or " +
+				"Neutron read access failed",
+		})
+	} else {
+		checks = append(checks, checkNova(ctx, options.CheckNova))
+	}
 	runner := options.Runner
 	if runner == nil {
 		checks = append(checks, Check{
@@ -91,6 +103,15 @@ func Run(ctx context.Context, options Options) []Check {
 				"ovn-sbctl",
 				"OVN Southbound",
 			),
+			checkContainerTool(
+				ctx,
+				runner,
+				options.OVNHost,
+				engine,
+				ovnContainer,
+				"ovn-trace",
+				"OVN trace",
+			),
 		)
 	}
 
@@ -110,7 +131,8 @@ func Run(ctx context.Context, options Options) []Check {
 		}
 		checks = append(
 			checks,
-			checkHostTool(ctx, runner, host, "tcpdump"),
+			checkHostTool(ctx, runner, host, "timeout"),
+			checkPacketCapture(ctx, runner, host),
 			checkContainerTool(
 				ctx,
 				runner,
@@ -119,6 +141,24 @@ func Run(ctx context.Context, options Options) []Check {
 				ovsContainer,
 				"ovs-vsctl",
 				"OVS on "+host,
+			),
+			checkContainerTool(
+				ctx,
+				runner,
+				host,
+				engine,
+				ovsContainer,
+				"ovs-appctl",
+				"OVS trace on "+host,
+			),
+			checkContainerTool(
+				ctx,
+				runner,
+				host,
+				engine,
+				ovsContainer,
+				"ovs-ofctl",
+				"OVS packet injection on "+host,
 			),
 		)
 	}
@@ -172,7 +212,33 @@ func checkOpenStack(
 	return Check{
 		Name:   "OpenStack authentication",
 		Status: StatusPass,
-		Cause:  "credentials and Neutron endpoint are available",
+		Cause: "credentials, Neutron endpoint, and minimum port read " +
+			"access are available",
+	}
+}
+
+func checkNova(
+	ctx context.Context,
+	check func(context.Context) error,
+) Check {
+	if check == nil {
+		return Check{
+			Name:   "Nova endpoint",
+			Status: StatusWarn,
+			Cause:  "Nova endpoint check was not configured",
+		}
+	}
+	if err := check(ctx); err != nil {
+		return Check{
+			Name:   "Nova endpoint",
+			Status: StatusWarn,
+			Cause:  "vm: selectors are unavailable: " + err.Error(),
+		}
+	}
+	return Check{
+		Name:   "Nova endpoint",
+		Status: StatusPass,
+		Cause:  "Nova compute endpoint is available for vm: selectors",
 	}
 }
 
@@ -202,6 +268,43 @@ func checkHostTool(
 		Name:   tool + " on " + host,
 		Status: StatusPass,
 		Cause:  tool + " is executable",
+	}
+}
+
+func checkPacketCapture(
+	ctx context.Context,
+	runner execx.Runner,
+	host string,
+) Check {
+	name := "tcpdump capture on " + host
+	_, err := runner.Run(
+		ctx,
+		host,
+		"sh",
+		"-c",
+		`command -v "$1" >/dev/null`,
+		"pathfinder-doctor",
+		"tcpdump",
+	)
+	if err != nil {
+		return Check{
+			Name:   name,
+			Status: StatusFail,
+			Cause:  "tcpdump is not executable: " + err.Error(),
+		}
+	}
+	if _, err := runner.Run(ctx, host, "tcpdump", "-D"); err != nil {
+		return Check{
+			Name:   name,
+			Status: StatusFail,
+			Cause: "tcpdump cannot enumerate capture interfaces; " +
+				"check capture permissions: " + err.Error(),
+		}
+	}
+	return Check{
+		Name:   name,
+		Status: StatusPass,
+		Cause:  "tcpdump can enumerate capture interfaces",
 	}
 }
 
