@@ -1,6 +1,7 @@
 package diagnose
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -922,6 +923,78 @@ func TestBuildObserveProbeVerifiesExternalPhysicalPath(t *testing.T) {
 	})
 	if !hasHop(result, "transport", StatusPass) {
 		t.Fatalf("verified transport hop not found: %v", result.Hops)
+	}
+}
+
+func TestBuildKeepsVerifiedDeliveryWhenReplyCaptureFails(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("source-network", "destination-network")
+	path.Source.Network.NetworkType = "vlan"
+	path.Source.Network.PhysicalNetwork = "external"
+	path.Destination.Network.NetworkType = "vlan"
+	path.Destination.Network.PhysicalNetwork = "external"
+	probe := topology.ProbeResult{
+		Mode:                     "live",
+		Protocol:                 "icmp",
+		Injected:                 true,
+		Delivered:                true,
+		ReplyExpected:            true,
+		ReplyGenerationAttempted: true,
+		FailureStage:             topology.ProbeFailureReplyGeneration,
+	}
+	probeError := errors.New("tcpdump permission denied")
+
+	result := Build(Input{
+		Neutron:        path,
+		Probe:          &probe,
+		ProbeRequested: true,
+		ProbeError:     probeError,
+		Microflow:      "icmp",
+	})
+
+	if !hasHop(result, "transport", StatusPass) {
+		t.Fatalf("verified transport was lost: %v", result.Hops)
+	}
+	if !hasHop(result, "live-probe", StatusPass) {
+		t.Fatalf("verified forward delivery was lost: %v", result.Hops)
+	}
+	if !hasHop(result, "reply-generation", StatusFail) {
+		t.Fatalf("reply capture failure was not localized: %v", result.Hops)
+	}
+	message := findingMessage(
+		result,
+		"reply-generation",
+		StatusFail,
+	)
+	if !strings.Contains(message, "tcpdump permission denied") {
+		t.Fatalf("reply capture cause missing: %q", message)
+	}
+}
+
+func TestBuildExplainsCaptureFailureAfterInjection(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	probe := topology.ProbeResult{
+		Mode:         "live",
+		Protocol:     "udp",
+		Injected:     true,
+		FailureStage: topology.ProbeFailureDeliveryCapture,
+	}
+	result := Build(Input{
+		Neutron:        path,
+		Probe:          &probe,
+		ProbeRequested: true,
+		ProbeError:     errors.New("tcpdump permission denied"),
+		Microflow:      "udp.dst == 53",
+	})
+
+	message := findingMessage(result, "live-probe", StatusFail)
+	if !strings.Contains(message, "injection succeeded") ||
+		!strings.Contains(message, "destination-capture") ||
+		!strings.Contains(message, "tcpdump permission denied") {
+		t.Fatalf("capture failure progress/cause missing: %q", message)
 	}
 }
 

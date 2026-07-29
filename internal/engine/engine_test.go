@@ -121,4 +121,11 @@ func TestAnalyzeProbePreservesProgressWhenCaptureFails(t *testing.T) {
 	if result.value.Mode != "live" || !result.value.Injected {
 		t.Fatalf("partial probe = %+v", *result.value)
 	}
+	if result.value.FailureStage !=
+		topology.ProbeFailureDeliveryCapture {
+		t.Fatalf(
+			"failure stage = %q",
+			result.value.FailureStage,
+		)
+	}
 }

@@ -127,6 +127,8 @@ func Run(
 	select {
 	case <-ctx.Done():
 		warmup.Stop()
+		result.FailureStage = topology.ProbeFailureCaptureWarmup
+		result.Duration = time.Since(started)
 		return result, ctx.Err()
 	case <-warmup.C:
 	}
@@ -136,12 +138,15 @@ func Run(
 		ovsPath.Source.OFPort,
 		packet.Bytes,
 	); err != nil {
+		result.FailureStage = topology.ProbeFailureInjection
+		result.Duration = time.Since(started)
 		return result, fmt.Errorf("inject packet: %w", err)
 	}
 	result.Injected = true
 
 	request, err := awaitCapture(ctx, requestCapture)
 	if err != nil {
+		result.FailureStage = topology.ProbeFailureDeliveryCapture
 		result.Duration = time.Since(started)
 		return result, fmt.Errorf(
 			"observe generated packet at destination: %w",
@@ -162,6 +167,7 @@ func Run(
 			replyGeneratedCapture,
 		)
 		if err != nil {
+			result.FailureStage = topology.ProbeFailureReplyGeneration
 			result.Duration = time.Since(started)
 			return result, fmt.Errorf(
 				"observe reply leaving destination: %w",
@@ -178,6 +184,7 @@ func Run(
 		result.ReplyObservationAttempted = true
 		reply, err := awaitCapture(ctx, replyCapture)
 		if err != nil {
+			result.FailureStage = topology.ProbeFailureReturnCapture
 			result.Duration = time.Since(started)
 			return result, fmt.Errorf("observe reply at source: %w", err)
 		}

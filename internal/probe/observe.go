@@ -106,6 +106,8 @@ func Observe(
 
 	sourceObservation, err := awaitCapture(ctx, sourceRequest)
 	if err != nil {
+		result.FailureStage = topology.ProbeFailureSourceCapture
+		result.Duration = time.Since(started)
 		return result, fmt.Errorf("observe packet at source: %w", err)
 	}
 	result.SourceObserved = strings.TrimSpace(sourceObservation.Output) != ""
@@ -116,6 +118,8 @@ func Observe(
 		destinationRequest,
 	)
 	if err != nil {
+		result.FailureStage = topology.ProbeFailureDeliveryCapture
+		result.Duration = time.Since(started)
 		return result, fmt.Errorf(
 			"observe packet at destination: %w",
 			err,
@@ -132,6 +136,8 @@ func Observe(
 		result.ReplyGenerationAttempted = true
 		generated, err := awaitCapture(ctx, destinationReply)
 		if err != nil {
+			result.FailureStage = topology.ProbeFailureReplyGeneration
+			result.Duration = time.Since(started)
 			return result, fmt.Errorf(
 				"observe reply leaving destination: %w",
 				err,
@@ -147,6 +153,8 @@ func Observe(
 		result.ReplyObservationAttempted = true
 		returned, err := awaitCapture(ctx, sourceReply)
 		if err != nil {
+			result.FailureStage = topology.ProbeFailureReturnCapture
+			result.Duration = time.Since(started)
 			return result, fmt.Errorf(
 				"observe reply arriving at source: %w",
 				err,

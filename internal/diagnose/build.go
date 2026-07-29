@@ -76,14 +76,7 @@ func Build(input Input) Report {
 	}
 
 	routeStatus, routeLabel, routeDetail := routeStatus(input.Neutron)
-	if routeStatus == StatusWarning &&
-		input.ProbeError == nil &&
-		input.Probe != nil &&
-		(input.Probe.Injected ||
-			(input.Probe.Mode == "observe" &&
-				input.Probe.SourceObservationAttempted &&
-				input.Probe.SourceObserved)) &&
-		input.Probe.Delivered {
+	if routeStatus == StatusWarning && probeDelivered(input) {
 		routeStatus = StatusPass
 		routeLabel = "external physical path (traffic verified)"
 		routeDetail += "; endpoint tap captures confirmed end-to-end delivery"
@@ -191,6 +184,7 @@ func Build(input Input) Report {
 		if input.Probe != nil && input.Probe.ReplyExpected {
 			generatedStatus, generatedDetail := generatedReply(
 				input.Probe,
+				input.ProbeError,
 			)
 			builder.addHop(Hop{
 				ID:     "reply-generation",
@@ -204,7 +198,10 @@ func Build(input Input) Report {
 				"guest reply",
 				generatedStatus,
 			)
-			replyStatus, replyDetail := observedReply(input.Probe)
+			replyStatus, replyDetail := observedReply(
+				input.Probe,
+				input.ProbeError,
+			)
 			builder.addHop(Hop{
 				ID:     "return-probe",
 				Label:  "return packet delivery",
@@ -231,6 +228,32 @@ func observedProbe(
 	observationError error,
 ) (Status, string) {
 	if observationError != nil {
+		if probe != nil && probe.Delivered {
+			return StatusPass, fmt.Sprintf(
+				"forward delivery was verified before a later probe "+
+					"stage failed (%s): %v",
+				probe.FailureStage,
+				observationError,
+			)
+		}
+		if probe != nil && probe.Mode == "observe" &&
+			probe.SourceObservationAttempted &&
+			probe.SourceObserved {
+			return StatusFail, fmt.Sprintf(
+				"matching traffic was observed on the source tap, but "+
+					"the %s stage failed: %v",
+				probe.FailureStage,
+				observationError,
+			)
+		}
+		if probe != nil && probe.Injected {
+			return StatusFail, fmt.Sprintf(
+				"packet-out injection succeeded, but the %s stage "+
+					"failed: %v",
+				probe.FailureStage,
+				observationError,
+			)
+		}
 		return StatusFail, observationError.Error()
 	}
 	if probe == nil {
@@ -281,7 +304,18 @@ func observedProbe(
 	)
 }
 
-func generatedReply(probe *topology.ProbeResult) (Status, string) {
+func generatedReply(
+	probe *topology.ProbeResult,
+	observationError error,
+) (Status, string) {
+	if observationError != nil &&
+		probe.FailureStage == topology.ProbeFailureReplyGeneration {
+		return StatusFail, fmt.Sprintf(
+			"forward delivery succeeded, but Pathfinder could not "+
+				"observe the destination reply stage: %v",
+			observationError,
+		)
+	}
 	if !probe.ReplyGenerationAttempted {
 		return StatusUnknown,
 			"reply generation was not tested because forward delivery " +
@@ -296,7 +330,18 @@ func generatedReply(probe *topology.ProbeResult) (Status, string) {
 			"left the guest"
 }
 
-func observedReply(probe *topology.ProbeResult) (Status, string) {
+func observedReply(
+	probe *topology.ProbeResult,
+	observationError error,
+) (Status, string) {
+	if observationError != nil &&
+		probe.FailureStage == topology.ProbeFailureReturnCapture {
+		return StatusFail, fmt.Sprintf(
+			"the destination reply was observed, but Pathfinder could "+
+				"not observe the source return stage: %v",
+			observationError,
+		)
+	}
 	if !probe.ReplyObservationAttempted {
 		return StatusUnknown,
 			"return delivery was not tested because a destination reply " +
@@ -819,8 +864,7 @@ func (builder *reportBuilder) addPlanTraceFinding(
 }
 
 func probeDelivered(input Input) bool {
-	if input.ProbeError != nil ||
-		input.Probe == nil ||
+	if input.Probe == nil ||
 		!input.Probe.Delivered {
 		return false
 	}
