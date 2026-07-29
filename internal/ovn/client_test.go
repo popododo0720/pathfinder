@@ -115,3 +115,20 @@ func TestGetEndpointPropagatesContainerCommandFailure(t *testing.T) {
 		t.Fatalf("GetEndpoint() error does not contain CommandError: %v", err)
 	}
 }
+
+func TestGetEndpointReportsMissingLogicalPort(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeRunner{responses: map[string]string{
+		"central|sh|-c": "",
+	}}
+	client := NewClient(runner, Config{
+		Host:      "central",
+		Container: "ovn_northd",
+	})
+
+	_, err := client.GetEndpoint(context.Background(), "missing-port")
+	if !errors.Is(err, ErrLogicalPortNotFound) {
+		t.Fatalf("GetEndpoint() error = %v", err)
+	}
+}

@@ -166,7 +166,10 @@ container=$2
 port=$3
 run() { "$engine" exec "$container" "$@"; }
 lsp_uuid=$(run ovn-nbctl --if-exists get Logical_Switch_Port "$port" _uuid)
-logical_switch=$(run ovn-nbctl lsp-get-ls "$port")
+logical_switch=
+if [ -n "$lsp_uuid" ]; then
+    logical_switch=$(run ovn-nbctl lsp-get-ls "$port")
+fi
 binding_uuid=$(run ovn-sbctl --bare --no-headings --columns=_uuid find Port_Binding logical_port="$port")
 datapath_uuid=
 chassis_uuid=
