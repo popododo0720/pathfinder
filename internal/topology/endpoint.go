@@ -24,7 +24,10 @@ type Endpoint struct {
 	VNICType         string
 	QoSPolicyID      string
 	SecurityGroupIDs []string
-	FixedIPs         []FixedIP
+	// PortSecurityEnabled is nil when Neutron did not return the
+	// port_security_enabled extension field.
+	PortSecurityEnabled *bool
+	FixedIPs            []FixedIP
 }
 
 func (endpoint Endpoint) SameNetwork(other Endpoint) bool {

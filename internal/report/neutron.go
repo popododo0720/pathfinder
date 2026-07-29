@@ -223,11 +223,19 @@ func displayList(values []string) string {
 }
 
 func portRange(rule topology.SecurityRule) string {
-	if rule.PortRangeMin == 0 && rule.PortRangeMax == 0 {
+	minSet := rule.PortRangeMinSet || rule.PortRangeMin != 0
+	maxSet := rule.PortRangeMaxSet || rule.PortRangeMax != 0
+	if !minSet && !maxSet {
 		return "any"
 	}
-	if rule.PortRangeMin == rule.PortRangeMax {
+	if minSet && maxSet && rule.PortRangeMin == rule.PortRangeMax {
 		return fmt.Sprintf("%d", rule.PortRangeMin)
+	}
+	if !minSet {
+		return fmt.Sprintf("any-%d", rule.PortRangeMax)
+	}
+	if !maxSet {
+		return fmt.Sprintf("%d-any", rule.PortRangeMin)
 	}
 	return fmt.Sprintf("%d-%d", rule.PortRangeMin, rule.PortRangeMax)
 }

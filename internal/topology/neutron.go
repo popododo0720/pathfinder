@@ -47,12 +47,16 @@ type RouterInterface struct {
 }
 
 type SecurityRule struct {
-	ID                   string
-	Direction            string
-	EtherType            string
-	Protocol             string
-	PortRangeMin         int
-	PortRangeMax         int
+	ID           string
+	Direction    string
+	EtherType    string
+	Protocol     string
+	PortRangeMin int
+	PortRangeMax int
+	// PortRangeMinSet and PortRangeMaxSet preserve Neutron's distinction
+	// between JSON null and the valid ICMP type/code value zero.
+	PortRangeMinSet      bool
+	PortRangeMaxSet      bool
 	RemoteIPPrefix       string
 	RemoteGroupID        string
 	RemoteAddressGroupID string

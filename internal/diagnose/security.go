@@ -13,6 +13,10 @@ type packetSpec struct {
 	protocol        string
 	destinationPort int
 	ipVersion       int
+	icmpType        int
+	icmpTypeSet     bool
+	icmpCode        int
+	icmpCodeSet     bool
 }
 
 var (
@@ -21,6 +25,12 @@ var (
 	)
 	packetDestinationPortPattern = regexp.MustCompile(
 		`(?i)\b(?:tcp|udp|sctp)\.dst\s*==\s*([0-9]+)`,
+	)
+	packetICMPTypePattern = regexp.MustCompile(
+		`(?i)\b(?:icmp|icmp4|icmp6)\.type\s*==\s*([0-9]+)`,
+	)
+	packetICMPCodePattern = regexp.MustCompile(
+		`(?i)\b(?:icmp|icmp4|icmp6)\.code\s*==\s*([0-9]+)`,
 	)
 )
 
@@ -39,6 +49,18 @@ func parsePacketSpec(
 		microflow,
 	); len(matches) == 2 {
 		spec.destinationPort, _ = strconv.Atoi(matches[1])
+	}
+	if matches := packetICMPTypePattern.FindStringSubmatch(
+		microflow,
+	); len(matches) == 2 {
+		spec.icmpType, _ = strconv.Atoi(matches[1])
+		spec.icmpTypeSet = true
+	}
+	if matches := packetICMPCodePattern.FindStringSubmatch(
+		microflow,
+	); len(matches) == 2 {
+		spec.icmpCode, _ = strconv.Atoi(matches[1])
+		spec.icmpCodeSet = true
 	}
 
 	sourceIP, destinationIP := compatibleAddresses(
@@ -65,6 +87,25 @@ func parsePacketSpec(
 			spec.protocol = "icmp4"
 		}
 	}
+	explicitICMPFields := spec.icmpTypeSet || spec.icmpCodeSet
+	if !explicitICMPFields && normalizeProtocol(spec.protocol) == "icmp4" {
+		if !spec.icmpTypeSet {
+			spec.icmpType = 8
+			spec.icmpTypeSet = true
+		}
+		if !spec.icmpCodeSet {
+			spec.icmpCodeSet = true
+		}
+	} else if !explicitICMPFields &&
+		normalizeProtocol(spec.protocol) == "icmp6" {
+		if !spec.icmpTypeSet {
+			spec.icmpType = 128
+			spec.icmpTypeSet = true
+		}
+		if !spec.icmpCodeSet {
+			spec.icmpCodeSet = true
+		}
+	}
 	return spec
 }
 
@@ -74,6 +115,10 @@ func evaluateSecurity(
 	direction string,
 	spec packetSpec,
 ) (Status, string) {
+	if context.Endpoint.PortSecurityEnabled != nil &&
+		!*context.Endpoint.PortSecurityEnabled {
+		return StatusPass, "port security is disabled; security groups are not enforced"
+	}
 	if len(context.SecurityGroups) == 0 {
 		return StatusUnknown, "no security groups returned"
 	}
@@ -139,12 +184,31 @@ func ruleMatches(
 		}
 	}
 
-	if rule.PortRangeMin != 0 || rule.PortRangeMax != 0 {
+	rangeMinSet := rule.PortRangeMinSet || rule.PortRangeMin != 0
+	rangeMaxSet := rule.PortRangeMaxSet || rule.PortRangeMax != 0
+	if ruleProtocol == "icmp4" || ruleProtocol == "icmp6" {
+		if rangeMinSet {
+			if !spec.icmpTypeSet {
+				return false, true
+			}
+			if spec.icmpType != rule.PortRangeMin {
+				return false, false
+			}
+		}
+		if rangeMaxSet {
+			if !spec.icmpCodeSet {
+				return false, true
+			}
+			if spec.icmpCode != rule.PortRangeMax {
+				return false, false
+			}
+		}
+	} else if rangeMinSet || rangeMaxSet {
 		if spec.destinationPort == 0 {
 			return false, true
 		}
-		if spec.destinationPort < rule.PortRangeMin ||
-			spec.destinationPort > rule.PortRangeMax {
+		if (rangeMinSet && spec.destinationPort < rule.PortRangeMin) ||
+			(rangeMaxSet && spec.destinationPort > rule.PortRangeMax) {
 			return false, false
 		}
 	}
@@ -168,10 +232,16 @@ func ruleMatches(
 
 func normalizeProtocol(protocol string) string {
 	switch strings.ToLower(protocol) {
-	case "icmp", "icmp4":
+	case "1", "icmp", "icmp4":
 		return "icmp4"
-	case "ipv6-icmp", "icmpv6", "icmp6":
+	case "6":
+		return "tcp"
+	case "17":
+		return "udp"
+	case "58", "ipv6-icmp", "icmpv6", "icmp6":
 		return "icmp6"
+	case "132":
+		return "sctp"
 	default:
 		return strings.ToLower(protocol)
 	}

@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"context"
+	"encoding/json"
 
 	"pathfinder/internal/topology"
 
@@ -15,6 +16,33 @@ type neutronPort struct {
 	ports.Port
 	portsbinding.PortsBindingExt
 	policies.QoSPolicyExt
+	PortSecurityEnabled *bool `json:"port_security_enabled"`
+}
+
+func (port *neutronPort) UnmarshalJSON(data []byte) error {
+	var base ports.Port
+	if err := json.Unmarshal(data, &base); err != nil {
+		return err
+	}
+	var binding portsbinding.PortsBindingExt
+	if err := json.Unmarshal(data, &binding); err != nil {
+		return err
+	}
+	var qos policies.QoSPolicyExt
+	if err := json.Unmarshal(data, &qos); err != nil {
+		return err
+	}
+	var security struct {
+		PortSecurityEnabled *bool `json:"port_security_enabled"`
+	}
+	if err := json.Unmarshal(data, &security); err != nil {
+		return err
+	}
+	port.Port = base
+	port.PortsBindingExt = binding
+	port.QoSPolicyExt = qos
+	port.PortSecurityEnabled = security.PortSecurityEnabled
+	return nil
 }
 
 func getPort(
@@ -52,19 +80,20 @@ func GetEndpoint(
 	}
 
 	return topology.Endpoint{
-		PortID:           port.ID,
-		ProjectID:        port.ProjectID,
-		Name:             port.Name,
-		Status:           port.Status,
-		MACAddress:       port.MACAddress,
-		NetworkID:        port.NetworkID,
-		DeviceID:         port.DeviceID,
-		DeviceOwner:      port.DeviceOwner,
-		HostID:           port.HostID,
-		VIFType:          port.VIFType,
-		VNICType:         port.VNICType,
-		QoSPolicyID:      port.QoSPolicyID,
-		SecurityGroupIDs: append([]string(nil), port.SecurityGroups...),
-		FixedIPs:         fixedIPs,
+		PortID:              port.ID,
+		ProjectID:           port.ProjectID,
+		Name:                port.Name,
+		Status:              port.Status,
+		MACAddress:          port.MACAddress,
+		NetworkID:           port.NetworkID,
+		DeviceID:            port.DeviceID,
+		DeviceOwner:         port.DeviceOwner,
+		HostID:              port.HostID,
+		VIFType:             port.VIFType,
+		VNICType:            port.VNICType,
+		QoSPolicyID:         port.QoSPolicyID,
+		SecurityGroupIDs:    append([]string(nil), port.SecurityGroups...),
+		PortSecurityEnabled: port.PortSecurityEnabled,
+		FixedIPs:            fixedIPs,
 	}, nil
 }
