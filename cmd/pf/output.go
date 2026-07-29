@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
+	"pathfinder/internal/diagnose"
 	"pathfinder/internal/engine"
 	"pathfinder/internal/report"
 
@@ -26,7 +28,23 @@ func runOutput(
 	if err != nil {
 		return err
 	}
-	return writeAnalysisOutput(command.OutOrStdout(), flags.output, result)
+	if err := writeAnalysisOutput(
+		command.OutOrStdout(),
+		flags.output,
+		result,
+	); err != nil {
+		return err
+	}
+	return diagnosisExitError(result)
+}
+
+var errDiagnosisFailed = errors.New("path diagnosis verdict is FAIL")
+
+func diagnosisExitError(result engine.Result) error {
+	if result.Diagnosis.Verdict == diagnose.StatusFail {
+		return errDiagnosisFailed
+	}
+	return nil
 }
 
 func writeAnalysisOutput(

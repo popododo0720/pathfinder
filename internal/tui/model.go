@@ -90,6 +90,10 @@ func NewModelWithAnalyzer(
 	return model
 }
 
+func (model *Model) FinalState() (*engine.Result, error) {
+	return model.result, model.err
+}
+
 func (model *Model) Init() tea.Cmd {
 	return tea.Batch(
 		model.spinner.Tick,

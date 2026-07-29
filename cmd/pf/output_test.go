@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -41,5 +42,20 @@ func TestAnalysisFlagsRejectUnknownOutput(t *testing.T) {
 	flags := &analysisFlags{enableOVS: true, output: "yaml"}
 	if err := flags.validate(); err == nil {
 		t.Fatal("unknown output format was accepted")
+	}
+}
+
+func TestFailedDiagnosisHasNonZeroExitError(t *testing.T) {
+	t.Parallel()
+
+	result := engine.Result{Diagnosis: diagnose.Report{
+		Verdict: diagnose.StatusFail,
+	}}
+	if !errors.Is(diagnosisExitError(result), errDiagnosisFailed) {
+		t.Fatal("failed diagnosis has no exit error")
+	}
+	result.Diagnosis.Verdict = diagnose.StatusWarning
+	if err := diagnosisExitError(result); err != nil {
+		t.Fatalf("warning diagnosis returned exit error: %v", err)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -73,7 +74,23 @@ func runDoctor(
 			return err
 		},
 	})
-	return writeDoctorOutput(command.OutOrStdout(), output, checks)
+	if err := writeDoctorOutput(
+		command.OutOrStdout(),
+		output,
+		checks,
+	); err != nil {
+		return err
+	}
+	return doctorExitError(checks)
+}
+
+var errDoctorFailed = errors.New("doctor verdict is FAIL")
+
+func doctorExitError(checks []doctor.Check) error {
+	if doctorVerdict(checks) == doctor.StatusFail {
+		return errDoctorFailed
+	}
+	return nil
 }
 
 type doctorSummary struct {

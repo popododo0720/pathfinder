@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -57,5 +58,18 @@ func TestDoctorCommandRejectsEndpointArguments(t *testing.T) {
 	command := newDoctorCommand()
 	if err := command.Args(command, []string{"source"}); err == nil {
 		t.Fatal("doctor accepted an endpoint argument")
+	}
+}
+
+func TestDoctorFailureHasNonZeroExitError(t *testing.T) {
+	t.Parallel()
+
+	checks := []doctor.Check{{
+		Name:   "SSH",
+		Status: doctor.StatusFail,
+		Cause:  "permission denied",
+	}}
+	if !errors.Is(doctorExitError(checks), errDoctorFailed) {
+		t.Fatal("failed doctor has no exit error")
 	}
 }

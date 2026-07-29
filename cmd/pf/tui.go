@@ -31,5 +31,12 @@ func runTUI(
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("run TUI: %w", err)
 	}
+	result, analysisError := model.FinalState()
+	if analysisError != nil {
+		return analysisError
+	}
+	if result != nil {
+		return diagnosisExitError(*result)
+	}
 	return nil
 }
