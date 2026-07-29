@@ -2,6 +2,7 @@ package diagnose
 
 import (
 	"fmt"
+	"net/netip"
 	"slices"
 	"strings"
 
@@ -519,6 +520,23 @@ func routeStatus(path topology.NeutronPath) (Status, string, string) {
 			path.Source.Network.Name
 	}
 
+	if destinationIP.IsValid() {
+		subnet, route, found := topology.LongestMatchingHostRoute(
+			path.Source.FlowSubnets(),
+			destinationIP,
+		)
+		if found {
+			return StatusWarning,
+				"Neutron subnet host route",
+				fmt.Sprintf(
+					"subnet %s selects %s via %s; forwarding beyond the configured next hop is not observable",
+					subnetLabel(subnet),
+					route.Destination,
+					route.NextHop,
+				)
+		}
+	}
+
 	sourceSubnets := subnetSet(path.Source.FlowSubnets())
 	destinationSubnets := subnetSet(path.Destination.FlowSubnets())
 	for _, router := range path.Routers {
@@ -565,22 +583,139 @@ func routeStatus(path topology.NeutronPath) (Status, string, string) {
 		}
 	}
 
-	if path.Source.Network.External &&
-		path.Destination.Network.External {
+	if destinationIP.IsValid() {
+		router, route, found := matchingRouterStaticRoute(
+			path.Routers,
+			sourceSubnets,
+			destinationIP,
+		)
+		if found {
+			status := StatusWarning
+			if !router.AdminStateUp || router.Status != "ACTIVE" {
+				status = StatusFail
+			}
+			return status,
+				"Neutron router static route",
+				fmt.Sprintf(
+					"%s; route %s via %s; reachability beyond the next hop is not observable",
+					routerStateDetail(router),
+					route.Destination,
+					route.NextHop,
+				)
+		}
+	}
+
+	if physicalBoundary(
+		path.Source.Network,
+		path.Destination.Network,
+	) {
 		return StatusWarning,
 			"external physical network boundary",
 			fmt.Sprintf(
-				"OpenStack sees provider %s/VLAN %s -> %s/VLAN %s; external switch/router forwarding is not observable",
-				path.Source.Network.PhysicalNetwork,
-				path.Source.Network.SegmentationID,
-				path.Destination.Network.PhysicalNetwork,
-				path.Destination.Network.SegmentationID,
+				"OpenStack sees %s -> %s; physical switch/router forwarding is not observable",
+				networkRouteDescription(path.Source.Network),
+				networkRouteDescription(path.Destination.Network),
 			)
 	}
 
 	return StatusFail,
 		"no Neutron route",
 		"no router connects the source and destination subnets"
+}
+
+func matchingRouterStaticRoute(
+	routers []topology.Router,
+	sourceSubnets map[string]struct{},
+	destination netip.Addr,
+) (topology.Router, topology.RouterRoute, bool) {
+	var (
+		selectedRouter topology.Router
+		selectedRoute  topology.RouterRoute
+		selectedBits   = -1
+	)
+
+	for _, router := range routers {
+		if !intersects(sourceSubnets, router.InterfaceSubnets) {
+			continue
+		}
+		route, found := topology.LongestMatchingRouterRoute(
+			router.Routes,
+			destination,
+		)
+		if !found {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(route.Destination)
+		if err != nil || prefix.Bits() <= selectedBits {
+			continue
+		}
+		selectedRouter = router
+		selectedRoute = route
+		selectedBits = prefix.Bits()
+	}
+
+	return selectedRouter, selectedRoute, selectedBits >= 0
+}
+
+func subnetLabel(subnet topology.Subnet) string {
+	if subnet.Name != "" {
+		return subnet.Name
+	}
+	if subnet.CIDR != "" {
+		return subnet.CIDR
+	}
+	return subnet.ID
+}
+
+func physicalBoundary(
+	source topology.Network,
+	destination topology.Network,
+) bool {
+	return physicalNetworkCandidate(source) &&
+		physicalNetworkCandidate(destination)
+}
+
+func physicalNetworkCandidate(network topology.Network) bool {
+	if network.External || network.PhysicalNetwork != "" {
+		return true
+	}
+	switch strings.ToLower(network.NetworkType) {
+	case "flat", "vlan":
+		return true
+	default:
+		return false
+	}
+}
+
+func networkRouteDescription(network topology.Network) string {
+	label := network.Name
+	if label == "" {
+		label = network.ID
+	}
+
+	var attributes []string
+	if network.External {
+		attributes = append(attributes, "external")
+	}
+	if network.NetworkType != "" {
+		attributes = append(attributes, "type="+network.NetworkType)
+	}
+	if network.PhysicalNetwork != "" {
+		attributes = append(
+			attributes,
+			"physnet="+network.PhysicalNetwork,
+		)
+	}
+	if network.SegmentationID != "" {
+		attributes = append(
+			attributes,
+			"segment="+network.SegmentationID,
+		)
+	}
+	if len(attributes) == 0 {
+		return label
+	}
+	return fmt.Sprintf("%s (%s)", label, strings.Join(attributes, ", "))
 }
 
 func routerLabel(router topology.Router) string {

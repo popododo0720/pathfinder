@@ -283,6 +283,213 @@ func TestBuildFailsWhenNoRouteExists(t *testing.T) {
 	}
 }
 
+func TestBuildReportsMostSpecificSubnetHostRoute(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("source-network", "destination-network")
+	path.Source.Subnets[0] = topology.Subnet{
+		ID:   "source-network-subnet",
+		Name: "source-subnet",
+		HostRoutes: []topology.HostRoute{
+			{
+				Destination: "10.0.0.0/8",
+				NextHop:     "192.0.2.1",
+			},
+			{
+				Destination: "10.0.0.16/28",
+				NextHop:     "192.0.2.2",
+			},
+		},
+	}
+
+	result := Build(Input{
+		Neutron:   path,
+		Microflow: "icmp",
+	})
+	if result.Verdict != StatusWarning {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	message := findingMessage(result, "transport", StatusWarning)
+	if !strings.Contains(message, "10.0.0.16/28") ||
+		!strings.Contains(message, "192.0.2.2") ||
+		!strings.Contains(message, "source-subnet") {
+		t.Fatalf("host-route cause missing: %q", message)
+	}
+}
+
+func TestBuildReportsMoreSpecificHostRouteOnSameSubnet(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	path.Source.Subnets[0] = topology.Subnet{
+		ID:   "network-subnet",
+		CIDR: "10.0.0.0/24",
+		HostRoutes: []topology.HostRoute{{
+			Destination: "10.0.0.20/32",
+			NextHop:     "10.0.0.254",
+		}},
+	}
+
+	result := Build(Input{
+		Neutron:   path,
+		Microflow: "icmp",
+	})
+	if result.Verdict != StatusWarning {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	message := findingMessage(result, "transport", StatusWarning)
+	if !strings.Contains(message, "10.0.0.20/32") ||
+		!strings.Contains(message, "10.0.0.254") {
+		t.Fatalf("same-subnet host-route cause missing: %q", message)
+	}
+}
+
+func TestBuildReportsRouterStaticRoute(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("source-network", "destination-network")
+	path.Routers = []topology.Router{
+		{
+			ID:               "router",
+			Name:             "router",
+			Status:           "ACTIVE",
+			AdminStateUp:     true,
+			InterfaceSubnets: []string{"source-network-subnet"},
+			Routes: []topology.RouterRoute{
+				{
+					Destination: "10.0.0.0/8",
+					NextHop:     "192.0.2.1",
+				},
+				{
+					Destination: "10.0.0.16/28",
+					NextHop:     "192.0.2.2",
+				},
+			},
+		},
+	}
+
+	result := Build(Input{
+		Neutron:   path,
+		Microflow: "icmp",
+	})
+	if result.Verdict != StatusWarning {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	message := findingMessage(result, "transport", StatusWarning)
+	if !strings.Contains(message, "route 10.0.0.16/28") ||
+		!strings.Contains(message, "via 192.0.2.2") ||
+		!strings.Contains(message, "router") {
+		t.Fatalf("router static-route cause missing: %q", message)
+	}
+}
+
+func TestBuildFailsWhenStaticRouteRouterIsDown(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("source-network", "destination-network")
+	path.Routers = []topology.Router{
+		{
+			ID:               "router",
+			Name:             "router",
+			Status:           "DOWN",
+			AdminStateUp:     true,
+			InterfaceSubnets: []string{"source-network-subnet"},
+			Routes: []topology.RouterRoute{
+				{
+					Destination: "10.0.0.0/8",
+					NextHop:     "192.0.2.1",
+				},
+			},
+		},
+	}
+
+	result := Build(Input{
+		Neutron:   path,
+		Microflow: "icmp",
+	})
+	if result.Verdict != StatusFail {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	message := findingMessage(result, "transport", StatusFail)
+	if !strings.Contains(message, "status=DOWN") {
+		t.Fatalf("router failure cause missing: %q", message)
+	}
+}
+
+func TestBuildOneSidedExternalProviderBoundaryWarns(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("source-network", "destination-network")
+	path.Source.Network.External = true
+	path.Source.Network.NetworkType = "vlan"
+	path.Source.Network.PhysicalNetwork = "external"
+	path.Source.Network.SegmentationID = "192"
+	path.Destination.Network.NetworkType = "vlan"
+	path.Destination.Network.PhysicalNetwork = "external"
+	path.Destination.Network.SegmentationID = "55"
+
+	result := Build(Input{
+		Neutron:   path,
+		Microflow: "icmp",
+	})
+	if result.Verdict != StatusWarning {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	message := findingMessage(result, "transport", StatusWarning)
+	if !strings.Contains(message, "segment=192") ||
+		!strings.Contains(message, "segment=55") {
+		t.Fatalf("provider-boundary cause missing: %q", message)
+	}
+}
+
+func TestBuildProviderBoundaryDoesNotHideEndpointFailure(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("source-network", "destination-network")
+	path.Source.Network.External = true
+	path.Source.Network.NetworkType = "vlan"
+	path.Destination.Network.NetworkType = "vlan"
+	path.Destination.Network.Status = "DOWN"
+
+	result := Build(Input{
+		Neutron:   path,
+		Microflow: "icmp",
+	})
+	if result.Verdict != StatusFail {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	if !hasFinding(result, "destination-network", StatusFail) {
+		t.Fatalf(
+			"destination failure was hidden: %v",
+			result.Findings,
+		)
+	}
+}
+
 func TestBuildRecognizesExternalToInternalRouterPath(t *testing.T) {
 	t.Parallel()
 

@@ -34,19 +34,30 @@ func ResolveNextHop(
 	ovsPath topology.OVSPath,
 	timeout time.Duration,
 ) (NextHop, error) {
-	subnetID, sourceIP, gatewayIP, err := sourceGateway(path.Source)
+	_, destinationIP, err := compatibleIPv4(
+		path.Source.FlowFixedIPs(),
+		path.Destination.FlowFixedIPs(),
+	)
+	if err != nil {
+		return NextHop{}, err
+	}
+	subnetID, sourceIP, nextHopIP, routeSource, err := sourceNextHop(
+		path.Source,
+		destinationIP,
+	)
 	if err != nil {
 		return NextHop{}, err
 	}
 	for _, router := range path.Routers {
 		for _, routerInterface := range router.Interfaces {
 			if routerInterface.SubnetID == subnetID &&
-				routerInterface.IPAddress == gatewayIP.String() &&
+				routerInterface.IPAddress == nextHopIP.String() &&
 				routerInterface.MACAddress != "" {
 				return NextHop{
-					IP:     routerInterface.IPAddress,
-					MAC:    routerInterface.MACAddress,
-					Source: "Neutron router interface",
+					IP:  routerInterface.IPAddress,
+					MAC: routerInterface.MACAddress,
+					Source: routeSource +
+						"; MAC from Neutron router interface",
 				}, nil
 			}
 		}
@@ -54,7 +65,7 @@ func ResolveNextHop(
 
 	filter := fmt.Sprintf(
 		"arp and arp[6:2] = 2 and src host %s and dst host %s",
-		gatewayIP,
+		nextHopIP,
 		sourceIP,
 	)
 	captureContext, cancelCapture := context.WithCancel(ctx)
@@ -72,7 +83,7 @@ func ResolveNextHop(
 	frame, err := buildARPRequest(
 		path.Source.Endpoint.MACAddress,
 		sourceIP,
-		gatewayIP,
+		nextHopIP,
 	)
 	if err != nil {
 		return NextHop{}, err
@@ -98,9 +109,10 @@ func ResolveNextHop(
 	}
 	if observation.TimedOut {
 		return NextHop{}, fmt.Errorf(
-			"%w: no ARP reply from gateway %s",
+			"%w: no ARP reply from next hop %s selected by %s",
 			ErrNextHopResolution,
-			gatewayIP,
+			nextHopIP,
+			routeSource,
 		)
 	}
 	matches := arpReplyMACPattern.FindStringSubmatch(
@@ -113,33 +125,66 @@ func ResolveNextHop(
 		)
 	}
 	return NextHop{
-		IP:     gatewayIP.String(),
-		MAC:    strings.ToLower(matches[1]),
-		Source: "ARP reply through source OVS port",
+		IP:  nextHopIP.String(),
+		MAC: strings.ToLower(matches[1]),
+		Source: routeSource +
+			"; MAC learned by ARP through source OVS port",
 	}, nil
 }
 
-func sourceGateway(
+func sourceNextHop(
 	source topology.EndpointContext,
-) (string, netip.Addr, netip.Addr, error) {
+	destinationIP netip.Addr,
+) (string, netip.Addr, netip.Addr, string, error) {
 	for _, fixedIP := range source.FlowFixedIPs() {
 		address, err := netip.ParseAddr(fixedIP.Address)
 		if err != nil || !address.Is4() {
 			continue
 		}
-		for _, subnet := range source.Subnets {
-			if subnet.ID != fixedIP.SubnetID ||
-				subnet.GatewayIP == "" {
+		for _, subnet := range source.FlowSubnets() {
+			if subnet.ID != fixedIP.SubnetID {
+				continue
+			}
+			_, route, found := topology.LongestMatchingHostRoute(
+				[]topology.Subnet{subnet},
+				destinationIP,
+			)
+			if found {
+				nextHop, err := netip.ParseAddr(route.NextHop)
+				if err != nil || !nextHop.Is4() {
+					return "", netip.Addr{}, netip.Addr{}, "",
+						fmt.Errorf(
+							"%w: subnet host route %s has invalid IPv4 next hop %q",
+							ErrNextHopResolution,
+							route.Destination,
+							route.NextHop,
+						)
+				}
+				return subnet.ID,
+					address,
+					nextHop,
+					fmt.Sprintf(
+						"Neutron subnet host route %s via %s",
+						route.Destination,
+						route.NextHop,
+					),
+					nil
+			}
+			if subnet.GatewayIP == "" {
 				continue
 			}
 			gateway, err := netip.ParseAddr(subnet.GatewayIP)
 			if err == nil && gateway.Is4() {
-				return subnet.ID, address, gateway, nil
+				return subnet.ID,
+					address,
+					gateway,
+					"Neutron subnet gateway " + subnet.GatewayIP,
+					nil
 			}
 		}
 	}
-	return "", netip.Addr{}, netip.Addr{}, fmt.Errorf(
-		"%w: source port has no IPv4 subnet gateway",
+	return "", netip.Addr{}, netip.Addr{}, "", fmt.Errorf(
+		"%w: source port has no matching IPv4 host route or subnet gateway",
 		ErrNextHopResolution,
 	)
 }

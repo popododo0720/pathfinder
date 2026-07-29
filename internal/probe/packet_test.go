@@ -136,6 +136,28 @@ func TestBuildPacketRequiresNextHopMACAcrossNetworks(t *testing.T) {
 	}
 }
 
+func TestBuildPacketRequiresHostRouteNextHopOnSameSubnet(t *testing.T) {
+	t.Parallel()
+
+	path := testPath("network", "network")
+	path.Source.Endpoint.FixedIPs[0].SubnetID = "subnet"
+	path.Source.Subnets = []topology.Subnet{{
+		ID:        "subnet",
+		CIDR:      "192.0.2.0/24",
+		GatewayIP: "192.0.2.1",
+		HostRoutes: []topology.HostRoute{{
+			Destination: "192.0.2.20/32",
+			NextHop:     "192.0.2.254",
+		}},
+	}}
+	path.Destination.Endpoint.FixedIPs[0].SubnetID = "subnet"
+
+	_, err := BuildPacket(path, "icmp")
+	if !errors.Is(err, ErrNextHopMACRequired) {
+		t.Fatalf("BuildPacket error = %v", err)
+	}
+}
+
 func TestBuildPacketUsesExplicitNextHopMAC(t *testing.T) {
 	t.Parallel()
 

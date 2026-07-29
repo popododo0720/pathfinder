@@ -3,6 +3,7 @@ package probe
 import (
 	"context"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -180,7 +181,7 @@ func TestBuildARPRequest(t *testing.T) {
 	}
 }
 
-func TestSourceGatewayUsesSelectedMultiIPv4Subnet(t *testing.T) {
+func TestSourceNextHopUsesSelectedMultiIPv4Subnet(t *testing.T) {
 	t.Parallel()
 
 	source := topology.EndpointContext{
@@ -204,19 +205,79 @@ func TestSourceGatewayUsesSelectedMultiIPv4Subnet(t *testing.T) {
 	selected := source.Endpoint.FixedIPs[1]
 	source.SelectedFixedIP = &selected
 
-	subnetID, sourceIP, gatewayIP, err := sourceGateway(source)
+	subnetID, sourceIP, nextHopIP, _, err := sourceNextHop(
+		source,
+		netip.MustParseAddr("198.51.100.20"),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if subnetID != "selected-subnet" ||
 		sourceIP.String() != "192.0.2.10" ||
-		gatewayIP.String() != "192.0.2.1" {
+		nextHopIP.String() != "192.0.2.1" {
 		t.Fatalf(
-			"gateway selection = %s %s -> %s",
+			"next-hop selection = %s %s -> %s",
 			subnetID,
 			sourceIP,
-			gatewayIP,
+			nextHopIP,
 		)
+	}
+}
+
+func TestResolveNextHopPrefersMostSpecificSubnetHostRoute(t *testing.T) {
+	t.Parallel()
+
+	path := routedProbePath()
+	path.Source.Subnets[0].HostRoutes = []topology.HostRoute{
+		{
+			Destination: "198.51.0.0/16",
+			NextHop:     "192.0.2.253",
+		},
+		{
+			Destination: "198.51.100.0/24",
+			NextHop:     "192.0.2.254",
+		},
+	}
+	path.Source.Subnets[0].GatewayIP = ""
+	runner := &gatewayRunner{
+		captureOutput: "ARP, Reply 192.0.2.254 is-at 00:11:22:33:44:55",
+	}
+
+	nextHop, err := ResolveNextHop(
+		context.Background(),
+		ovs.NewClient(
+			runner,
+			ovs.Config{Host: "stack1", Container: "ovs"},
+		),
+		path,
+		topology.OVSPath{
+			Source: topology.OVSEndpoint{
+				Interface: "tap-source",
+				OFPort:    7,
+			},
+		},
+		time.Second,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nextHop.IP != "192.0.2.254" {
+		t.Fatalf("next hop = %+v", nextHop)
+	}
+	if !strings.Contains(
+		nextHop.Source,
+		"host route 198.51.100.0/24 via 192.0.2.254",
+	) {
+		t.Fatalf("next-hop cause = %q", nextHop.Source)
+	}
+
+	runner.mu.Lock()
+	commands := append([]string(nil), runner.commands...)
+	runner.mu.Unlock()
+	if !slices.ContainsFunc(commands, func(command string) bool {
+		return strings.Contains(command, "src host 192.0.2.254")
+	}) {
+		t.Fatalf("ARP did not target host-route next hop: %v", commands)
 	}
 }
 

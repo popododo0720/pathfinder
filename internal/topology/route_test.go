@@ -1,0 +1,144 @@
+package topology
+
+import (
+	"net/netip"
+	"testing"
+)
+
+func TestLongestMatchingHostRouteChoosesMostSpecificPrefix(t *testing.T) {
+	t.Parallel()
+
+	subnets := []Subnet{
+		{
+			ID: "source-subnet",
+			HostRoutes: []HostRoute{
+				{
+					Destination: "198.51.0.0/16",
+					NextHop:     "192.0.2.1",
+				},
+				{
+					Destination: "198.51.100.0/24",
+					NextHop:     "192.0.2.2",
+				},
+			},
+		},
+	}
+
+	subnet, route, ok := LongestMatchingHostRoute(
+		subnets,
+		netip.MustParseAddr("198.51.100.20"),
+	)
+	if !ok {
+		t.Fatal("no matching host route")
+	}
+	if subnet.ID != "source-subnet" {
+		t.Fatalf("subnet = %q", subnet.ID)
+	}
+	if route.Destination != "198.51.100.0/24" ||
+		route.NextHop != "192.0.2.2" {
+		t.Fatalf("route = %+v", route)
+	}
+}
+
+func TestLongestMatchingRouterRouteIgnoresInvalidAndOtherFamilyRoutes(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	route, ok := LongestMatchingRouterRoute(
+		[]RouterRoute{
+			{Destination: "invalid", NextHop: "192.0.2.1"},
+			{Destination: "2001:db8::/32", NextHop: "2001:db8::1"},
+			{Destination: "203.0.113.0/24", NextHop: "192.0.2.2"},
+		},
+		netip.MustParseAddr("203.0.113.10"),
+	)
+	if !ok {
+		t.Fatal("no matching router route")
+	}
+	if route.Destination != "203.0.113.0/24" {
+		t.Fatalf("route = %+v", route)
+	}
+}
+
+func TestRequiresNextHopForMoreSpecificSameSubnetHostRoute(t *testing.T) {
+	t.Parallel()
+
+	source := EndpointContext{
+		Endpoint: Endpoint{
+			NetworkID: "network",
+			FixedIPs: []FixedIP{{
+				Address:  "192.0.2.10",
+				SubnetID: "subnet",
+			}},
+		},
+		Subnets: []Subnet{{
+			ID:   "subnet",
+			CIDR: "192.0.2.0/24",
+			HostRoutes: []HostRoute{{
+				Destination: "192.0.2.20/32",
+				NextHop:     "192.0.2.254",
+			}},
+		}},
+	}
+	destination := EndpointContext{
+		Endpoint: Endpoint{
+			NetworkID: "network",
+			FixedIPs: []FixedIP{{
+				Address:  "192.0.2.20",
+				SubnetID: "subnet",
+			}},
+		},
+	}
+
+	if !RequiresNextHop(
+		source,
+		destination,
+		netip.MustParseAddr("192.0.2.10"),
+		netip.MustParseAddr("192.0.2.20"),
+	) {
+		t.Fatal("more-specific host route did not require its next hop")
+	}
+}
+
+func TestRequiresNextHopKeepsConnectedRouteOverLessSpecificHostRoute(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	source := EndpointContext{
+		Endpoint: Endpoint{
+			NetworkID: "network",
+			FixedIPs: []FixedIP{{
+				Address:  "192.0.2.10",
+				SubnetID: "subnet",
+			}},
+		},
+		Subnets: []Subnet{{
+			ID:   "subnet",
+			CIDR: "192.0.2.0/24",
+			HostRoutes: []HostRoute{{
+				Destination: "0.0.0.0/0",
+				NextHop:     "192.0.2.254",
+			}},
+		}},
+	}
+	destination := EndpointContext{
+		Endpoint: Endpoint{
+			NetworkID: "network",
+			FixedIPs: []FixedIP{{
+				Address:  "192.0.2.20",
+				SubnetID: "subnet",
+			}},
+		},
+	}
+
+	if RequiresNextHop(
+		source,
+		destination,
+		netip.MustParseAddr("192.0.2.10"),
+		netip.MustParseAddr("192.0.2.20"),
+	) {
+		t.Fatal("less-specific host route overrode the connected subnet")
+	}
+}

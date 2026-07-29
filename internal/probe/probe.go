@@ -60,14 +60,17 @@ func Run(
 			packet.SourceIP,
 			packet.DestinationIP,
 		) {
-		_, _, gatewayIP, gatewayErr := sourceGateway(
+		_, _, nextHopIP, routeSource, nextHopErr := sourceNextHop(
 			neutronPath.Source,
+			packet.DestinationIP,
 		)
-		if gatewayErr == nil {
-			nextHop.IP = gatewayIP.String()
+		if nextHopErr == nil {
+			nextHop.IP = nextHopIP.String()
+			nextHop.Source = routeSource + "; MAC from microflow eth.dst"
+		} else {
+			nextHop.Source = "microflow eth.dst"
 		}
 		nextHop.MAC = packet.DestinationMAC.String()
-		nextHop.Source = "microflow eth.dst"
 	}
 	if err != nil {
 		return topology.ProbeResult{}, err
