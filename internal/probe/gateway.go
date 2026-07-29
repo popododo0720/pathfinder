@@ -41,6 +41,7 @@ func ResolveNextHop(
 	for _, router := range path.Routers {
 		for _, routerInterface := range router.Interfaces {
 			if routerInterface.SubnetID == subnetID &&
+				routerInterface.IPAddress == gatewayIP.String() &&
 				routerInterface.MACAddress != "" {
 				return NextHop{
 					IP:     routerInterface.IPAddress,
@@ -107,9 +108,8 @@ func ResolveNextHop(
 	)
 	if len(matches) != 2 {
 		return NextHop{}, fmt.Errorf(
-			"%w: could not parse gateway MAC from %q",
+			"%w: could not parse gateway MAC from packet capture",
 			ErrNextHopResolution,
-			observation.Output,
 		)
 	}
 	return NextHop{

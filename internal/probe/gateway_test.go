@@ -14,8 +14,9 @@ import (
 )
 
 type gatewayRunner struct {
-	mu       sync.Mutex
-	commands []string
+	mu            sync.Mutex
+	commands      []string
+	captureOutput string
 }
 
 func (runner *gatewayRunner) Run(
@@ -29,8 +30,12 @@ func (runner *gatewayRunner) Run(
 	command := host + "|" + name + "|" + strings.Join(args, " ")
 	runner.commands = append(runner.commands, command)
 	if strings.Contains(command, "tcpdump") {
+		output := runner.captureOutput
+		if output == "" {
+			output = "ARP, Reply 192.0.2.1 is-at 00:11:22:33:44:55"
+		}
 		return execx.Result{
-			Stdout: "ARP, Reply 192.0.2.1 is-at 00:11:22:33:44:55",
+			Stdout: output,
 		}, nil
 	}
 	return execx.Result{}, nil
@@ -69,6 +74,37 @@ func TestResolveNextHopUsesNeutronRouterInterface(t *testing.T) {
 	}
 }
 
+func TestResolveNextHopUsesInterfaceMatchingSubnetGateway(t *testing.T) {
+	t.Parallel()
+
+	path := routedProbePath()
+	path.Routers = []topology.Router{
+		{Interfaces: []topology.RouterInterface{{
+			SubnetID:   "source-subnet",
+			IPAddress:  "192.0.2.254",
+			MACAddress: "fa:16:3e:00:00:fd",
+		}}},
+		{Interfaces: []topology.RouterInterface{{
+			SubnetID:   "source-subnet",
+			IPAddress:  "192.0.2.1",
+			MACAddress: "fa:16:3e:00:00:fe",
+		}}},
+	}
+	nextHop, err := ResolveNextHop(
+		context.Background(),
+		ovs.NewClient(&gatewayRunner{}, ovs.Config{Host: "stack1"}),
+		path,
+		topology.OVSPath{},
+		time.Second,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nextHop.MAC != "fa:16:3e:00:00:fe" {
+		t.Fatalf("next hop = %+v", nextHop)
+	}
+}
+
 func TestResolveNextHopLearnsProviderGatewayWithARP(t *testing.T) {
 	t.Parallel()
 
@@ -94,6 +130,33 @@ func TestResolveNextHopLearnsProviderGatewayWithARP(t *testing.T) {
 	if nextHop.IP != "192.0.2.1" ||
 		nextHop.MAC != "00:11:22:33:44:55" {
 		t.Fatalf("next hop = %+v", nextHop)
+	}
+}
+
+func TestResolveNextHopDoesNotExposeRawCaptureInError(t *testing.T) {
+	t.Parallel()
+
+	const rawCapture = "RAW_CAPTURE_MUST_NOT_RENDER"
+	_, err := ResolveNextHop(
+		context.Background(),
+		ovs.NewClient(
+			&gatewayRunner{captureOutput: rawCapture},
+			ovs.Config{Host: "stack1", Container: "ovs"},
+		),
+		routedProbePath(),
+		topology.OVSPath{
+			Source: topology.OVSEndpoint{
+				Interface: "tap-source",
+				OFPort:    7,
+			},
+		},
+		10*time.Millisecond,
+	)
+	if err == nil {
+		t.Fatal("invalid ARP capture was accepted")
+	}
+	if strings.Contains(err.Error(), rawCapture) {
+		t.Fatalf("raw capture leaked through error: %v", err)
 	}
 }
 
