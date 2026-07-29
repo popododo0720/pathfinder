@@ -18,8 +18,13 @@ Pathfinder correlates:
 - Exact source/destination tap packet capture and reply-path verification
 - A compact path graph with PASS, WARN, FAIL, and UNKNOWN findings
 - An interactive TUI for navigating the path, traces, and probe result
+- Cause-focused text and JSON output without raw packet-capture payloads
+- A `doctor` command for OpenStack, SSH, Kolla, OVN, OVS, and `tcpdump`
+  prerequisites
 
 ## Build
+
+Go 1.26.5 or newer is required.
 
 ```sh
 go build -o bin/pf ./cmd/pf
@@ -33,6 +38,15 @@ Load a standard OpenStack OpenRC file first:
 source /path/to/openrc.sh
 ```
 
+User/project domain variables, application credentials, `OS_REGION_NAME`,
+and `OS_INTERFACE` are supported. TLS certificates are verified by default.
+Use `OS_CACERT` for a private CA. In a private lab where verification is
+intentionally disabled:
+
+```sh
+export OS_INSECURE=true
+```
+
 Pathfinder uses SSH to run commands in Kolla containers and `tcpdump` on
 compute hosts. Live mode also runs `ovs-ofctl packet-out`; plan mode is
 read-only. Key-based SSH is preferred:
@@ -41,6 +55,7 @@ read-only. Key-based SSH is preferred:
 export PF_OVN_HOST=192.0.2.11
 export PF_SSH_USER=root
 export PF_SSH_KEY=~/.ssh/id_ed25519
+export PF_HOST_MAP='compute1=192.0.2.21,compute2=192.0.2.22'
 ```
 
 For a password-only lab, put the password in the environment instead of a
@@ -59,6 +74,7 @@ Relevant optional variables:
 | `PF_SSH_USER` | `root` | SSH user |
 | `PF_SSH_KEY` | unset | SSH private key |
 | `PF_SSH_PASSWORD` | unset | SSH password used through `sshpass -e` |
+| `PF_HOST_MAP` | unset | Comma-separated `NAME=ADDRESS` compute mappings |
 | `PF_CONTAINER_ENGINE` | `docker` | Kolla container engine |
 | `PF_OVN_CONTAINER` | `ovn_northd` | Container with OVN CLI tools |
 | `PF_OVS_CONTAINER` | `openvswitch_vswitchd` | Container with OVS CLI tools |
@@ -80,6 +96,17 @@ Each endpoint argument accepts one of these selectors:
 Names and addresses must resolve to exactly one port. Ambiguous selectors
 return all candidate port or VM IDs instead of choosing one. For a
 multi-NIC VM, add `@IP`; `vm-id:SERVER_UUID@IP` is also accepted.
+
+Run a dependency check before the first trace:
+
+```sh
+pf doctor
+```
+
+Every failed check includes the concrete cause, such as a missing CA file,
+failed SSH authentication, a missing Kolla container, or an unavailable
+OVN/OVS command. `pf doctor --output json` provides the same checks for
+automation.
 
 Live mode sends one packet and opens the TUI:
 
@@ -133,13 +160,24 @@ the live capture window.
 
 `--host-map` translates Neutron's `binding:host_id` into an SSH address. It
 can be omitted when those host names already resolve through DNS or SSH
-configuration.
+configuration. Repeated mappings can instead be stored once in
+`PF_HOST_MAP`.
 
-There are no `plan` or `tui` subcommands. The TUI is always used:
+There are no `plan` or `tui` subcommands. The TUI is the default output:
 
 - default: inject and verify a generated packet
 - `--plan`: simulate without sending
 - `--observe`: correlate existing traffic without sending
+
+For scripts or a non-interactive terminal, select a cause-focused output:
+
+```sh
+pf --plan --output text ip:192.0.2.10 vm:web
+pf --plan --output json vm:api@192.0.2.20 port:database
+```
+
+Text and JSON include endpoint identity, ordered hop status, findings,
+timings, and failure causes. They intentionally omit raw packet captures.
 
 Keyboard controls:
 
