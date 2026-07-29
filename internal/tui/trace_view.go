@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -219,11 +220,11 @@ func writeTracePipeline(
 			output.WriteByte('\n')
 		}
 		if stage.Rule != "" {
-			fmt.Fprintf(
+			writeWrappedTraceLine(
 				output,
-				"    %s %s\n",
-				subtitleStyle.Render("match"),
-				compactTraceText(stage.Rule, max(width-10, 24)),
+				"    "+subtitleStyle.Render("match")+" ",
+				stage.Rule,
+				width,
 			)
 		}
 		if stage.Action != "" {
@@ -234,11 +235,11 @@ func writeTracePipeline(
 			) {
 				actionStyle = statusStyle("FAIL")
 			}
-			fmt.Fprintf(
+			writeWrappedTraceLine(
 				output,
-				"    %s %s\n",
-				actionStyle.Render("→"),
-				compactTraceText(stage.Action, max(width-8, 24)),
+				"    "+actionStyle.Render("→")+" ",
+				stage.Action,
+				width,
 			)
 		}
 	}
@@ -264,14 +265,19 @@ func writeTraceOutcome(
 	))
 	if summary.Outcome != "" {
 		output.WriteString("\n")
-		output.WriteString(compactTraceText(summary.Outcome, width))
+		output.WriteString(strings.Join(
+			wrapTraceText(summary.Outcome, width),
+			"\n",
+		))
 	}
 	if summary.FailureCause != "" {
 		output.WriteString("\n")
-		output.WriteString(
+		writeWrappedTraceLine(
+			output,
 			statusStyle("FAIL").Render("Cause: "),
+			summary.FailureCause,
+			width,
 		)
-		output.WriteString(summary.FailureCause)
 	}
 	output.WriteString("\n\n")
 	output.WriteString(subtitleStyle.Render(
@@ -358,19 +364,99 @@ func traceOutcomeStyle(outcome traceOutcome) lipgloss.Style {
 }
 
 func (model Model) traceTextWidth() int {
-	return max(model.viewport.Width-8, 40)
+	return max(model.viewport.Width-8, 16)
 }
 
 func compactTraceText(value string, width int) string {
 	value = strings.Join(strings.Fields(value), " ")
-	if width < 2 {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(value) <= width {
 		return value
 	}
-	characters := []rune(value)
-	if len(characters) <= width {
-		return value
+	if width == 1 {
+		return "…"
 	}
-	return string(characters[:width-1]) + "…"
+
+	var output strings.Builder
+	used := 0
+	for _, character := range value {
+		characterWidth := lipgloss.Width(string(character))
+		if used+characterWidth > width-1 {
+			break
+		}
+		output.WriteRune(character)
+		used += characterWidth
+	}
+	return strings.TrimRight(output.String(), " ") + "…"
+}
+
+func writeWrappedTraceLine(
+	output *strings.Builder,
+	prefix string,
+	value string,
+	width int,
+) {
+	prefixWidth := lipgloss.Width(prefix)
+	lines := wrapTraceText(value, max(width-prefixWidth, 1))
+	for index, line := range lines {
+		if index == 0 {
+			output.WriteString(prefix)
+		} else {
+			output.WriteString(strings.Repeat(" ", prefixWidth))
+		}
+		output.WriteString(line)
+		output.WriteByte('\n')
+	}
+}
+
+func wrapTraceText(value string, width int) []string {
+	value = strings.Join(strings.Fields(value), " ")
+	if value == "" {
+		return nil
+	}
+	if width <= 0 || lipgloss.Width(value) <= width {
+		return []string{value}
+	}
+
+	lines := make([]string, 0, 2)
+	remaining := value
+	for remaining != "" {
+		if lipgloss.Width(remaining) <= width {
+			lines = append(lines, remaining)
+			break
+		}
+
+		cut := 0
+		lastSpace := 0
+		used := 0
+		for index, character := range remaining {
+			characterWidth := lipgloss.Width(string(character))
+			if used+characterWidth > width {
+				break
+			}
+			used += characterWidth
+			cut = index + len(string(character))
+			if character == ' ' {
+				lastSpace = index
+			}
+		}
+		if lastSpace > 0 {
+			cut = lastSpace
+		}
+		if cut == 0 {
+			_, size := utf8.DecodeRuneInString(remaining)
+			cut = size
+		}
+
+		lines = append(
+			lines,
+			strings.TrimSpace(remaining[:cut]),
+		)
+		remaining = strings.TrimSpace(remaining[cut:])
+	}
+	return lines
 }
 
 func displayTraceValue(value string) string {

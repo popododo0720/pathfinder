@@ -42,6 +42,9 @@ var (
 	ovnStagePattern = regexp.MustCompile(
 		`^\s*(\d+)\.\s+([[:alnum:]_.-]+)(?:\s+\([^)]*\))?:\s*(.*)$`,
 	)
+	ovnOutputActionPattern = regexp.MustCompile(
+		`^output(?:\s*\([^;]*\))?$`,
+	)
 	ovsBridgePattern = regexp.MustCompile(
 		`^\s*bridge\("([^"]+)"\)\s*$`,
 	)
@@ -84,37 +87,30 @@ func summarizeOVNSummary(lines []string) traceSummary {
 	summary := traceSummary{}
 	phaseStack := make([]string, 0, 4)
 	frameStack := make([]bool, 0, 8)
-	var current *traceStage
-
-	flush := func() {
-		if current == nil {
+	appendAction := func(action string) {
+		action = cleanOVNAction(action)
+		if action == "" || len(phaseStack) == 0 {
 			return
 		}
-		current.Action = strings.TrimSpace(current.Action)
-		if current.Action != "" {
-			summary.Stages = append(summary.Stages, *current)
-		}
-		current = nil
+		summary.Stages = append(summary.Stages, traceStage{
+			Phase:  phaseStack[len(phaseStack)-1],
+			Name:   "logical pipeline",
+			Action: action,
+		})
 	}
 
 	for _, line := range lines {
 		if matches := ovnPipelinePattern.FindStringSubmatch(
 			line,
 		); len(matches) == 4 && matches[3] == "{" {
-			flush()
 			phase := strings.ToUpper(matches[1]) +
 				"  " + strings.TrimSpace(matches[2])
 			phaseStack = append(phaseStack, phase)
 			frameStack = append(frameStack, true)
-			current = &traceStage{
-				Phase: phase,
-				Name:  "logical pipeline",
-			}
 			continue
 		}
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "};" || trimmed == "}" {
-			flush()
 			if len(frameStack) == 0 {
 				continue
 			}
@@ -126,7 +122,9 @@ func summarizeOVNSummary(lines []string) traceSummary {
 			continue
 		}
 		if strings.HasSuffix(trimmed, "{") {
+			appendAction(trimmed)
 			frameStack = append(frameStack, false)
+			continue
 		}
 		if trimmed == "" ||
 			strings.HasPrefix(trimmed, "#") ||
@@ -136,19 +134,8 @@ func summarizeOVNSummary(lines []string) traceSummary {
 		if len(phaseStack) == 0 {
 			continue
 		}
-		if current == nil {
-			current = &traceStage{
-				Phase: phaseStack[len(phaseStack)-1],
-				Name:  "logical pipeline",
-			}
-		}
-		action := cleanOVNAction(trimmed)
-		if current.Action != "" {
-			current.Action += " "
-		}
-		current.Action += action
+		appendAction(trimmed)
 	}
-	flush()
 	classifyOVNOutcome(&summary)
 	if len(summary.Stages) == 0 {
 		summary.ParseFallback = true
@@ -341,9 +328,12 @@ func classifyOVNOutcome(summary *traceSummary) {
 				summary.FailureCause = ovnDropCause(stage)
 			}
 		}
-		if strings.Contains(evidence, "output") {
+		if hasOVNOutputAction(stage.Action) {
 			hasOutput = true
 			lastOutput = stage.Action
+		}
+		if summary.FailureCause == "" {
+			summary.FailureCause = ovnOutputFailureCause(evidence)
 		}
 	}
 	switch {
@@ -358,6 +348,29 @@ func classifyOVNOutcome(summary *traceSummary) {
 		summary.Outcome = "drop"
 	default:
 		summary.OutcomeKind = traceOutcomeUnknown
+	}
+}
+
+func hasOVNOutputAction(action string) bool {
+	for _, statement := range strings.Split(action, ";") {
+		statement = strings.TrimSpace(statement)
+		if ovnOutputActionPattern.MatchString(statement) {
+			return true
+		}
+	}
+	return false
+}
+
+func ovnOutputFailureCause(evidence string) string {
+	switch {
+	case strings.Contains(evidence, "output to null logical port"):
+		return "trace output targets a null logical port"
+	case strings.Contains(evidence, "unknown port"):
+		return "trace references an unknown logical port"
+	case strings.Contains(evidence, "omitting output because"):
+		return "OVN omitted the output action"
+	default:
+		return ""
 	}
 }
 

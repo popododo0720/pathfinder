@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	"pathfinder/internal/ovs"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestSummarizeOVNTraceExtractsLogicalStages(t *testing.T) {
@@ -59,19 +62,132 @@ ingress(dp="net-a", inport="source") {
     };
 };`)
 
-	if len(summary.Stages) != 2 {
-		t.Fatalf("stages = %d, want 2: %#v", len(summary.Stages), summary)
+	if len(summary.Stages) != 3 {
+		t.Fatalf("stages = %d, want 3: %#v", len(summary.Stages), summary)
 	}
 	if summary.Stages[0].Phase !=
 		`INGRESS  dp="net-a", inport="source"` {
 		t.Fatalf("unexpected ingress stage: %#v", summary.Stages[0])
 	}
-	if summary.Stages[1].Phase !=
+	if summary.Stages[0].Action != `outport = "destination";` ||
+		summary.Stages[1].Action != "output;" {
+		t.Fatalf("summary actions were merged: %#v", summary.Stages)
+	}
+	if summary.Stages[2].Phase !=
 		`EGRESS  dp="net-a", inport="source", outport="destination"` {
-		t.Fatalf("unexpected egress stage: %#v", summary.Stages[1])
+		t.Fatalf("unexpected egress stage: %#v", summary.Stages[2])
 	}
 	if summary.OutcomeKind != traceOutcomeForward {
 		t.Fatalf("outcome kind = %q", summary.OutcomeKind)
+	}
+}
+
+func TestSummarizeOfficialOVNSummaryPreservesNestedActions(t *testing.T) {
+	t.Parallel()
+
+	summary := summarizeOVNTrace(`# tcp
+ingress(dp="net-a", inport="source") {
+    ct_next(ct_state=est|trk) {
+        reg0[0] = 1;
+        outport = "destination";
+        output;
+    };
+};`)
+
+	if len(summary.Stages) != 4 {
+		t.Fatalf("stages = %d, want 4: %#v", len(summary.Stages), summary)
+	}
+	want := []string{
+		"ct_next(ct_state=est|trk) {",
+		"reg0[0] = 1;",
+		`outport = "destination";`,
+		"output;",
+	}
+	for index, expected := range want {
+		if summary.Stages[index].Action != expected {
+			t.Fatalf(
+				"stage %d action = %q, want %q",
+				index,
+				summary.Stages[index].Action,
+				expected,
+			)
+		}
+	}
+}
+
+func TestOVNOutcomeRequiresAnActualOutputAction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		trace string
+		cause string
+	}{
+		{
+			name: "omitted output",
+			trace: `ingress(dp="net-a", inport="source") {
+    /* omitting output because the port is not enabled */
+};`,
+			cause: "OVN omitted the output action",
+		},
+		{
+			name: "null logical port",
+			trace: `ingress(dp="net-a", inport="source") {
+    *** output to null logical port
+};`,
+			cause: "trace output targets a null logical port",
+		},
+		{
+			name: "unknown port",
+			trace: `ingress(dp="net-a", inport="source") {
+    *** unknown port "missing"
+};`,
+			cause: "trace references an unknown logical port",
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			summary := summarizeOVNTrace(test.trace)
+			if summary.OutcomeKind != traceOutcomeUnknown {
+				t.Fatalf(
+					"outcome = %q, want UNKNOWN: %#v",
+					summary.OutcomeKind,
+					summary,
+				)
+			}
+			if summary.FailureCause != test.cause {
+				t.Fatalf(
+					"cause = %q, want %q",
+					summary.FailureCause,
+					test.cause,
+				)
+			}
+		})
+	}
+}
+
+func TestOVNOutputActionRecognitionIsAnchored(t *testing.T) {
+	t.Parallel()
+
+	for _, action := range []string{
+		"output;",
+		`outport = "destination"; output;`,
+		`output("destination");`,
+	} {
+		if !hasOVNOutputAction(action) {
+			t.Fatalf("actual output action was missed: %q", action)
+		}
+	}
+	for _, action := range []string{
+		"omitting output because disabled",
+		"output to null logical port",
+		`unknown port in output`,
+	} {
+		if hasOVNOutputAction(action) {
+			t.Fatalf("non-action was classified as output: %q", action)
+		}
 	}
 }
 
@@ -271,5 +387,45 @@ func TestTraceSummaryNormalizesCRLFAndControlCharacters(t *testing.T) {
 	}
 	if summary.OutcomeKind != traceOutcomeForward {
 		t.Fatalf("outcome kind = %q", summary.OutcomeKind)
+	}
+}
+
+func TestWrappedTraceActionsPreserveAllEvidenceWithinWidth(t *testing.T) {
+	t.Parallel()
+
+	const evidence = "output-long-token-1234567890 destination-tail"
+	var output strings.Builder
+	writeTracePipeline(
+		&output,
+		traceSummary{
+			Stages: []traceStage{{
+				Phase:  "INGRESS",
+				Action: evidence,
+			}},
+		},
+		true,
+		24,
+	)
+
+	rendered := output.String()
+	if !strings.Contains(rendered, "destination-tail") {
+		t.Fatalf("wrapped action lost evidence:\n%s", rendered)
+	}
+	for _, line := range strings.Split(rendered, "\n") {
+		if width := lipgloss.Width(line); width > 24 {
+			t.Fatalf("line width = %d, want <= 24: %q", width, line)
+		}
+	}
+}
+
+func TestCompactTraceTextUsesDisplayWidth(t *testing.T) {
+	t.Parallel()
+
+	got := compactTraceText("가나다라마바사", 6)
+	if width := lipgloss.Width(got); width > 6 {
+		t.Fatalf("display width = %d, want <= 6: %q", width, got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("truncated text lacks ellipsis: %q", got)
 	}
 }
