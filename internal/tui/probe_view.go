@@ -106,13 +106,12 @@ func (model Model) probeSummaryContent() string {
 func (model Model) probeDetailContent() string {
 	probe := model.result.Probe
 	mode := probeMode(probe.Mode)
-	status := "NOT DELIVERED"
-	if probe.Delivered {
-		status = "DELIVERED"
-	}
+	status := string(probeVerdict(
+		probe,
+		model.result.ProbeError != nil,
+	))
 	errorDetail := ""
 	if model.result.ProbeError != nil {
-		status = "ERROR"
 		errorDetail = "\nCause: " + model.result.ProbeError.Error()
 	}
 	reply := "not expected"
@@ -144,7 +143,7 @@ func (model Model) probeDetailContent() string {
 	writeTraceHeading(&output, "PROBE VERIFICATION", "DETAILS")
 	fmt.Fprintf(
 		&output,
-		"\n\n%s: %s%s\n\nMethod: %s\nMarker: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nNext hop: %s\nInjected: %t\nSource tap: %s\nExact destination capture: %t\nReply: %s\nFailure stage: %s\nDuration: %s\n\nRequest filter:\n%s\n\nReply filter:\n%s\n\n%s",
+		"\n\n%s: %s%s\n\nMethod: %s\nMarker: %s\nProtocol: %s\nSource: %s:%d (endpoint MAC: %s)\nDestination: %s:%d\nL2 destination/next-hop MAC: %s\nNext hop: %s\nInjected: %t\nSource tap: %s\nExact destination capture: %t\nReply: %s\nFailure stage: %s\nDuration: %s\n\nRequest filter:\n%s\n\nReply filter:\n%s\n\n%s",
 		mode,
 		status,
 		errorDetail,
@@ -187,10 +186,35 @@ func liveProbeTimeline(
 	probe *topology.ProbeResult,
 	hasError bool,
 ) []probeTimelineStep {
+	capture := probeTimelineStep{
+		State: probeStepPass,
+		Label: "Capture setup",
+		Detail: "destination and reply captures started; capture warmup " +
+			"completed",
+	}
+	if probeStageFailed(
+		probe,
+		hasError,
+		topology.ProbeFailureCaptureWarmup,
+	) {
+		capture.State = probeStepError
+		capture.Detail = "capture warmup did not complete"
+	}
+
 	injection := probeTimelineStep{
-		State:  boolProbeState(probe.Injected),
+		State:  probeStepSkip,
 		Label:  "Source OVS packet injection",
-		Detail: "crafted packet submitted to the source br-int port",
+		Detail: "not attempted because capture setup did not complete",
+	}
+	if capture.State == probeStepPass {
+		injection.State = boolProbeState(probe.Injected)
+		if probe.Injected {
+			injection.Detail =
+				"crafted packet was accepted by the source br-int pipeline"
+		} else {
+			injection.Detail =
+				"source OVS did not confirm packet-out injection"
+		}
 	}
 	if probeStageFailed(
 		probe,
@@ -198,6 +222,7 @@ func liveProbeTimeline(
 		topology.ProbeFailureInjection,
 	) {
 		injection.State = probeStepError
+		injection.Detail = "source OVS packet-out command failed"
 	}
 
 	source := probeTimelineStep{
@@ -208,7 +233,12 @@ func liveProbeTimeline(
 	}
 	if probe.SourceObservationAttempted {
 		source.State = boolProbeState(probe.SourceObserved)
-		source.Detail = "matching injected packet on the source tap"
+		if probe.SourceObserved {
+			source.Detail = "matching injected packet observed on the source tap"
+		} else {
+			source.Detail =
+				"no matching injected packet was observed on the source tap"
+		}
 	}
 	if probeStageFailed(
 		probe,
@@ -222,10 +252,13 @@ func liveProbeTimeline(
 		probe,
 		hasError,
 		probe.Injected,
+		probeStepSkip,
 		"Exact packet captured on the destination tap",
+		"exact packet marker was not observed on the destination tap",
+		"not attempted because packet injection did not succeed",
 	)
 	return append(
-		[]probeTimelineStep{injection, source, delivery},
+		[]probeTimelineStep{capture, injection, source, delivery},
 		replyTimelineSteps(probe, hasError)...,
 	)
 }
@@ -234,6 +267,11 @@ func observedProbeTimeline(
 	probe *topology.ProbeResult,
 	hasError bool,
 ) []probeTimelineStep {
+	capture := probeTimelineStep{
+		State:  probeStepPass,
+		Label:  "Capture setup",
+		Detail: "source and destination tap captures were started",
+	}
 	injection := probeTimelineStep{
 		State:  probeStepSkip,
 		Label:  "Packet injection",
@@ -246,7 +284,12 @@ func observedProbeTimeline(
 	}
 	if probe.SourceObservationAttempted {
 		source.State = boolProbeState(probe.SourceObserved)
-		source.Detail = "matching guest traffic captured on the source tap"
+		if probe.SourceObserved {
+			source.Detail = "matching guest traffic captured on the source tap"
+		} else {
+			source.Detail =
+				"no matching guest traffic was observed on the source tap"
+		}
 	}
 	if probeStageFailed(
 		probe,
@@ -259,10 +302,13 @@ func observedProbeTimeline(
 		probe,
 		hasError,
 		probe.SourceObserved,
+		probeStepUnknown,
 		"Source packet marker correlated on the destination tap",
+		"source packet marker was not correlated on the destination tap",
+		"destination correlation is unknown without a source packet marker",
 	)
 	return append(
-		[]probeTimelineStep{injection, source, delivery},
+		[]probeTimelineStep{capture, injection, source, delivery},
 		replyTimelineSteps(probe, hasError)...,
 	)
 }
@@ -271,16 +317,23 @@ func deliveryTimelineStep(
 	probe *topology.ProbeResult,
 	hasError bool,
 	prerequisite bool,
-	detail string,
+	blockedState probeStepState,
+	successDetail string,
+	failureDetail string,
+	blockedDetail string,
 ) probeTimelineStep {
 	step := probeTimelineStep{
-		State:  probeStepSkip,
+		State:  blockedState,
 		Label:  "Destination request delivery",
-		Detail: "not reached because the preceding stage did not succeed",
+		Detail: blockedDetail,
 	}
 	if prerequisite || probe.Delivered {
 		step.State = boolProbeState(probe.Delivered)
-		step.Detail = detail
+		if probe.Delivered {
+			step.Detail = successDetail
+		} else {
+			step.Detail = failureDetail
+		}
 	}
 	if probeStageFailed(
 		probe,
@@ -319,7 +372,17 @@ func replyTimelineSteps(
 	}
 	if probe.ReplyGenerationAttempted || probe.ReplyGenerated {
 		generation.State = boolProbeState(probe.ReplyGenerated)
-		generation.Detail = "matching reply left the destination guest tap"
+		if probe.ReplyGenerated {
+			generation.Detail =
+				"matching reply left the destination guest tap"
+		} else {
+			generation.Detail =
+				"no matching reply left the destination guest tap"
+		}
+	} else if probe.Delivered {
+		generation.State = probeStepUnknown
+		generation.Detail =
+			"request delivery was verified, but reply capture was not attempted"
 	}
 	if probeStageFailed(
 		probe,
@@ -337,7 +400,16 @@ func replyTimelineSteps(
 	}
 	if probe.ReplyObservationAttempted || probe.ReplyObserved {
 		returnDelivery.State = boolProbeState(probe.ReplyObserved)
-		returnDelivery.Detail = "matching reply captured on the source tap"
+		if probe.ReplyObserved {
+			returnDelivery.Detail = "matching reply captured on the source tap"
+		} else {
+			returnDelivery.Detail =
+				"matching reply was not observed on the source tap"
+		}
+	} else if probe.ReplyGenerated {
+		returnDelivery.State = probeStepUnknown
+		returnDelivery.Detail =
+			"reply generation was verified, but return capture was not attempted"
 	}
 	if probeStageFailed(
 		probe,
@@ -361,10 +433,14 @@ func probeVerdict(
 		(!probe.SourceObservationAttempted || !probe.SourceObserved) {
 		return probeStepFail
 	}
+	if probe.Mode != "observe" && !probe.Injected {
+		return probeStepFail
+	}
 	if !probe.Delivered {
 		return probeStepFail
 	}
-	if probe.ReplyExpected && !probe.ReplyObserved {
+	if probe.ReplyExpected &&
+		(!probe.ReplyGenerated || !probe.ReplyObserved) {
 		return probeStepFail
 	}
 	return probeStepPass
