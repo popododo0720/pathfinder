@@ -47,6 +47,7 @@ func TestBuildPacketCreatesIPv4TCPSYN(t *testing.T) {
 	for _, expected := range []string{
 		"src host 192.0.2.10",
 		"dst host 192.0.2.20",
+		"ip[4:2] = " + strconv.Itoa(int(packet.Identifier)),
 		"tcp src port",
 		"tcp dst port 443",
 	} {
@@ -60,6 +61,21 @@ func TestBuildPacketCreatesIPv4TCPSYN(t *testing.T) {
 	}
 	if !packet.ReplyExpected() {
 		t.Fatal("TCP reply should be expected")
+	}
+	if got := binary.BigEndian.Uint32(packet.Bytes[38:42]); got !=
+		packet.TCPSequence {
+		t.Fatalf("TCP sequence = %d, want %d", got, packet.TCPSequence)
+	}
+	expectedACK := strconv.FormatUint(
+		uint64(packet.TCPSequence+1),
+		10,
+	)
+	if !strings.Contains(packet.ReplyFilter(), "tcp[8:4] = "+expectedACK) {
+		t.Fatalf("ReplyFilter = %q", packet.ReplyFilter())
+	}
+	if !strings.Contains(packet.Marker(), "ipv4-id:") ||
+		!strings.Contains(packet.Marker(), "seq:") {
+		t.Fatalf("Marker = %q", packet.Marker())
 	}
 }
 
@@ -86,6 +102,25 @@ func TestBuildPacketCreatesCorrelatedICMPFilters(t *testing.T) {
 			packet.SourcePort,
 			packet.DestinationPort,
 		)
+	}
+}
+
+func TestBuildPacketCreatesExactUDPRequestFilter(t *testing.T) {
+	t.Parallel()
+
+	packet, err := BuildPacket(
+		testPath("network", "network"),
+		"udp.src == 41000 && udp.dst == 53",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identifier := strconv.Itoa(int(packet.Identifier))
+	if !strings.Contains(packet.RequestFilter(), "ip[4:2] = "+identifier) {
+		t.Fatalf("RequestFilter = %q", packet.RequestFilter())
+	}
+	if !strings.Contains(packet.Marker(), "ipv4-id:"+identifier) {
+		t.Fatalf("Marker = %q", packet.Marker())
 	}
 }
 

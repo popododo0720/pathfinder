@@ -25,6 +25,7 @@ var (
 type Packet struct {
 	Bytes           []byte
 	Identifier      uint16
+	TCPSequence     uint32
 	Protocol        string
 	SourceIP        netip.Addr
 	DestinationIP   netip.Addr
@@ -84,8 +85,10 @@ func buildPacket(
 	sourcePort := spec.sourcePort
 	destinationPort := spec.destinationPort
 	identifier := randomUint16()
+	var tcpSequence uint32
 	switch protocol {
 	case "tcp":
+		tcpSequence = randomUint32()
 		if sourcePort == 0 {
 			sourcePort = 40000 + int(randomUint16()%20000)
 		}
@@ -108,6 +111,7 @@ func buildPacket(
 		sourcePort,
 		destinationPort,
 		identifier,
+		tcpSequence,
 	)
 	ipHeader := buildIPv4Header(
 		sourceIP,
@@ -130,6 +134,7 @@ func buildPacket(
 	return Packet{
 		Bytes:           frame,
 		Identifier:      identifier,
+		TCPSequence:     tcpSequence,
 		Protocol:        protocol,
 		SourceIP:        sourceIP,
 		DestinationIP:   destinationIP,
@@ -146,12 +151,20 @@ func (packet Packet) Hex() string {
 
 func (packet Packet) Marker() string {
 	switch packet.Protocol {
-	case "tcp", "udp":
+	case "tcp":
 		return fmt.Sprintf(
-			"%s:%d->%d",
-			packet.Protocol,
+			"tcp:%d->%d,ipv4-id:%d,seq:%d",
 			packet.SourcePort,
 			packet.DestinationPort,
+			packet.Identifier,
+			packet.TCPSequence,
+		)
+	case "udp":
+		return fmt.Sprintf(
+			"udp:%d->%d,ipv4-id:%d",
+			packet.SourcePort,
+			packet.DestinationPort,
+			packet.Identifier,
 		)
 	default:
 		return fmt.Sprintf("icmp-id:%d", packet.Identifier)
@@ -167,8 +180,9 @@ func (packet Packet) RequestFilter() string {
 	switch packet.Protocol {
 	case "tcp", "udp":
 		return fmt.Sprintf(
-			"%s and %s src port %d and %s dst port %d",
+			"%s and ip[4:2] = %d and %s src port %d and %s dst port %d",
 			base,
+			packet.Identifier,
 			packet.Protocol,
 			packet.SourcePort,
 			packet.Protocol,
@@ -192,10 +206,12 @@ func (packet Packet) ReplyFilter() string {
 	switch packet.Protocol {
 	case "tcp":
 		return fmt.Sprintf(
-			"%s and tcp src port %d and tcp dst port %d and (tcp[13] & 0x16 != 0)",
+			"%s and tcp src port %d and tcp dst port %d and "+
+				"(tcp[13] & 0x16 != 0) and tcp[8:4] = %d",
 			base,
 			packet.DestinationPort,
 			packet.SourcePort,
+			packet.TCPSequence+1,
 		)
 	case "udp":
 		return fmt.Sprintf(
@@ -276,6 +292,7 @@ func buildTransport(
 	sourcePort int,
 	destinationPort int,
 	identifier uint16,
+	tcpSequence uint32,
 ) ([]byte, byte) {
 	switch protocol {
 	case "tcp":
@@ -284,6 +301,7 @@ func buildTransport(
 			destinationIP,
 			sourcePort,
 			destinationPort,
+			tcpSequence,
 		), 6
 	case "udp":
 		return buildUDP(
@@ -325,14 +343,12 @@ func buildTCP(
 	destinationIP netip.Addr,
 	sourcePort int,
 	destinationPort int,
+	sequence uint32,
 ) []byte {
 	header := make([]byte, 20)
 	binary.BigEndian.PutUint16(header[0:2], uint16(sourcePort))
 	binary.BigEndian.PutUint16(header[2:4], uint16(destinationPort))
-	binary.BigEndian.PutUint32(
-		header[4:8],
-		uint32(time.Now().UnixNano()),
-	)
+	binary.BigEndian.PutUint32(header[4:8], sequence)
 	header[12] = 5 << 4
 	header[13] = 0x02
 	binary.BigEndian.PutUint16(header[14:16], 65535)
@@ -412,4 +428,12 @@ func randomUint16() uint16 {
 		return binary.BigEndian.Uint16(value[:])
 	}
 	return uint16(time.Now().UnixNano())
+}
+
+func randomUint32() uint32 {
+	var value [4]byte
+	if _, err := rand.Read(value[:]); err == nil {
+		return binary.BigEndian.Uint32(value[:])
+	}
+	return uint32(time.Now().UnixNano())
 }
