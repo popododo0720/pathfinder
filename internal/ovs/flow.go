@@ -15,7 +15,7 @@ var (
 		"source and destination have no compatible fixed IPs",
 	)
 	protocolPattern = regexp.MustCompile(
-		`(?i)\b(tcp|udp|sctp|icmp4|icmp6)\b`,
+		`(?i)\b(tcp|udp|sctp|icmp|icmp4|icmp6)\b`,
 	)
 	sourcePortPattern = regexp.MustCompile(
 		`(?i)\b(?:tcp|udp|sctp)\.src\s*==\s*([0-9]+)`,
@@ -48,7 +48,12 @@ func BuildTraceFlow(
 	}
 
 	destinationMAC := ""
-	if source.Endpoint.SameNetwork(destination.Endpoint) {
+	if !topology.RequiresNextHop(
+		source,
+		destination,
+		sourceIP,
+		destinationIP,
+	) {
 		destinationMAC = destination.Endpoint.MACAddress
 	} else if matches := ethernetDestinationPattern.FindStringSubmatch(
 		extra,
@@ -60,6 +65,13 @@ func BuildTraceFlow(
 	}
 
 	protocol := parseProtocol(extra)
+	if protocol == "" {
+		if sourceIP.Is4() {
+			protocol = "icmp4"
+		} else {
+			protocol = "icmp6"
+		}
+	}
 	fields = append(fields, ovsProtocol(sourceIP.Is4(), protocol))
 	if sourceIP.Is4() {
 		fields = append(
@@ -115,7 +127,11 @@ func parseProtocol(value string) string {
 	if len(matches) != 2 {
 		return ""
 	}
-	return strings.ToLower(matches[1])
+	protocol := strings.ToLower(matches[1])
+	if protocol == "icmp" {
+		return "icmp4"
+	}
+	return protocol
 }
 
 func parsePort(pattern *regexp.Regexp, value string) string {

@@ -135,6 +135,51 @@ func TestBuildPacketUsesResolvedNextHopMAC(t *testing.T) {
 	}
 }
 
+func TestBuildPacketRequiresGatewayForDifferentSubnetOnSameNetwork(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	path := testPath("network", "network")
+	path.Source.Endpoint.FixedIPs[0].SubnetID = "source-subnet"
+	path.Source.Subnets = []topology.Subnet{
+		{
+			ID:        "source-subnet",
+			CIDR:      "192.0.2.0/28",
+			GatewayIP: "192.0.2.1",
+		},
+	}
+	path.Destination.Endpoint.FixedIPs[0] = topology.FixedIP{
+		Address:  "192.0.2.20",
+		SubnetID: "destination-subnet",
+	}
+
+	_, err := BuildPacket(path, "icmp")
+	if !errors.Is(err, ErrNextHopMACRequired) {
+		t.Fatalf("BuildPacket error = %v", err)
+	}
+}
+
+func TestBuildPacketUsesDirectMACWithinSourceSubnet(t *testing.T) {
+	t.Parallel()
+
+	path := testPath("network", "network")
+	path.Source.Endpoint.FixedIPs[0].SubnetID = "subnet"
+	path.Source.Subnets = []topology.Subnet{
+		{ID: "subnet", CIDR: "192.0.2.0/24"},
+	}
+	path.Destination.Endpoint.FixedIPs[0].SubnetID = "subnet"
+
+	packet, err := BuildPacket(path, "icmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if packet.DestinationMAC.String() !=
+		path.Destination.Endpoint.MACAddress {
+		t.Fatalf("DestinationMAC = %s", packet.DestinationMAC)
+	}
+}
+
 func testPath(
 	sourceNetwork string,
 	destinationNetwork string,

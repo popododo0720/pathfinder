@@ -8,9 +8,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"regexp"
-	"strconv"
-	"strings"
 	"time"
 
 	"pathfinder/internal/topology"
@@ -22,19 +19,6 @@ var (
 	)
 	ErrNextHopMACRequired = errors.New(
 		"cross-network live probe requires a next-hop MAC",
-	)
-
-	protocolPattern = regexp.MustCompile(
-		`(?i)\b(tcp|udp|icmp|icmp4)\b`,
-	)
-	sourcePortPattern = regexp.MustCompile(
-		`(?i)\b(?:tcp|udp)\.src\s*==\s*([0-9]+)`,
-	)
-	destinationPortPattern = regexp.MustCompile(
-		`(?i)\b(?:tcp|udp)\.dst\s*==\s*([0-9]+)`,
-	)
-	destinationMACPattern = regexp.MustCompile(
-		`(?i)\beth\.dst\s*==\s*([0-9a-f:]{17})`,
 	)
 )
 
@@ -77,22 +61,28 @@ func buildPacket(
 	if err != nil {
 		return Packet{}, err
 	}
+	spec, err := parseProbeMicroflow(microflow)
+	if err != nil {
+		return Packet{}, err
+	}
 	sourceMAC, err := net.ParseMAC(path.Source.Endpoint.MACAddress)
 	if err != nil {
 		return Packet{}, fmt.Errorf("parse source MAC: %w", err)
 	}
 	destinationMAC, err := packetDestinationMAC(
 		path,
-		microflow,
+		spec,
 		destinationMACOverride,
+		sourceIP,
+		destinationIP,
 	)
 	if err != nil {
 		return Packet{}, err
 	}
 
-	protocol := parseProtocol(microflow)
-	sourcePort := parsePort(sourcePortPattern, microflow)
-	destinationPort := parsePort(destinationPortPattern, microflow)
+	protocol := spec.protocol
+	sourcePort := spec.sourcePort
+	destinationPort := spec.destinationPort
 	identifier := randomUint16()
 	switch protocol {
 	case "tcp":
@@ -250,20 +240,21 @@ func compatibleIPv4(
 
 func packetDestinationMAC(
 	path topology.NeutronPath,
-	microflow string,
+	spec microflowSpec,
 	override string,
+	sourceIP netip.Addr,
+	destinationIP netip.Addr,
 ) (net.HardwareAddr, error) {
 	value := override
-	if value == "" &&
-		path.Source.Endpoint.SameNetwork(path.Destination.Endpoint) {
+	if value == "" && !topology.RequiresNextHop(
+		path.Source,
+		path.Destination,
+		sourceIP,
+		destinationIP,
+	) {
 		value = path.Destination.Endpoint.MACAddress
 	} else if value == "" {
-		matches := destinationMACPattern.FindStringSubmatch(
-			microflow,
-		)
-		if len(matches) == 2 {
-			value = matches[1]
-		}
+		value = spec.destinationMAC
 	}
 	if value == "" {
 		return nil, fmt.Errorf(
@@ -276,28 +267,6 @@ func packetDestinationMAC(
 		return nil, fmt.Errorf("parse destination MAC: %w", err)
 	}
 	return address, nil
-}
-
-func parseProtocol(microflow string) string {
-	matches := protocolPattern.FindStringSubmatch(microflow)
-	if len(matches) != 2 {
-		return "icmp"
-	}
-	switch strings.ToLower(matches[1]) {
-	case "icmp4":
-		return "icmp"
-	default:
-		return strings.ToLower(matches[1])
-	}
-}
-
-func parsePort(pattern *regexp.Regexp, microflow string) int {
-	matches := pattern.FindStringSubmatch(microflow)
-	if len(matches) != 2 {
-		return 0
-	}
-	value, _ := strconv.Atoi(matches[1])
-	return value
 }
 
 func buildTransport(

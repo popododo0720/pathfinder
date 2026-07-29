@@ -229,8 +229,21 @@ func (client *Client) CapturePacket(
 	filter string,
 	timeout time.Duration,
 ) (CaptureResult, error) {
+	return client.CapturePackets(ctx, interfaceName, filter, timeout, 1)
+}
+
+func (client *Client) CapturePackets(
+	ctx context.Context,
+	interfaceName string,
+	filter string,
+	timeout time.Duration,
+	maxPackets int,
+) (CaptureResult, error) {
 	if timeout <= 0 {
 		timeout = time.Second
+	}
+	if maxPackets <= 0 {
+		maxPackets = 1
 	}
 	result, err := client.runner.Run(
 		ctx,
@@ -245,14 +258,17 @@ func (client *Client) CapturePacket(
 		"-vv",
 		"-l",
 		"-c",
-		"1",
+		strconv.Itoa(maxPackets),
 		filter,
 	)
 	if err != nil {
 		var commandError *execx.CommandError
 		if errors.As(err, &commandError) &&
 			commandError.ExitCode == 124 {
-			return CaptureResult{TimedOut: true}, nil
+			return CaptureResult{
+				Output:   strings.TrimSpace(result.Stdout),
+				TimedOut: true,
+			}, nil
 		}
 		return CaptureResult{}, fmt.Errorf(
 			"capture on %s: %w",
@@ -261,10 +277,7 @@ func (client *Client) CapturePacket(
 		)
 	}
 	return CaptureResult{
-		Output: strings.TrimSpace(
-			strings.TrimSpace(result.Stdout) + "\n" +
-				strings.TrimSpace(result.Stderr),
-		),
+		Output: strings.TrimSpace(result.Stdout),
 	}, nil
 }
 

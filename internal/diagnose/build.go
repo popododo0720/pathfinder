@@ -78,11 +78,13 @@ func Build(input Input) Report {
 	if routeStatus == StatusWarning &&
 		input.ProbeError == nil &&
 		input.Probe != nil &&
-		input.Probe.Injected &&
+		(input.Probe.Injected ||
+			(input.Probe.Mode == "observe" &&
+				input.Probe.SourceObserved)) &&
 		input.Probe.Delivered {
 		routeStatus = StatusPass
-		routeLabel = "external physical path (live verified)"
-		routeDetail += "; live probe confirmed end-to-end delivery"
+		routeLabel = "external physical path (traffic verified)"
+		routeDetail += "; endpoint tap captures confirmed end-to-end delivery"
 	}
 	builder.addHop(Hop{
 		ID:     "transport",
@@ -270,6 +272,11 @@ func observedProbe(
 }
 
 func generatedReply(probe *topology.ProbeResult) (Status, string) {
+	if !probe.ReplyGenerationAttempted {
+		return StatusUnknown,
+			"reply generation was not tested because forward delivery " +
+				"was not verified"
+	}
 	if probe.ReplyGenerated {
 		return StatusPass,
 			"matching reply observed leaving the destination tap"
@@ -280,6 +287,11 @@ func generatedReply(probe *topology.ProbeResult) (Status, string) {
 }
 
 func observedReply(probe *topology.ProbeResult) (Status, string) {
+	if !probe.ReplyObservationAttempted {
+		return StatusUnknown,
+			"return delivery was not tested because a destination reply " +
+				"was not verified"
+	}
 	if probe.ReplyObserved {
 		return StatusPass, fmt.Sprintf(
 			"reply observed on source tap; filter=%s",

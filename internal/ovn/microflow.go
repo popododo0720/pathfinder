@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"regexp"
 	"strings"
 
 	"pathfinder/internal/topology"
@@ -12,6 +13,8 @@ import (
 var ErrNoCompatibleFixedIPs = errors.New(
 	"source and destination have no compatible fixed IPs",
 )
+
+var plainICMPPattern = regexp.MustCompile(`(?i)\bicmp\b`)
 
 func BuildMicroflow(
 	source topology.EndpointContext,
@@ -34,7 +37,12 @@ func BuildMicroflow(
 		fmt.Sprintf("eth.src == %s", source.Endpoint.MACAddress),
 	}
 
-	if source.Endpoint.SameNetwork(destination.Endpoint) {
+	if !topology.RequiresNextHop(
+		source,
+		destination,
+		sourceIP,
+		destinationIP,
+	) {
 		conditions = append(
 			conditions,
 			fmt.Sprintf(
@@ -58,12 +66,19 @@ func BuildMicroflow(
 		)
 	}
 
-	if strings.TrimSpace(extra) != "" {
-		conditions = append(
-			conditions,
-			"("+strings.TrimSpace(extra)+")",
-		)
+	extra = strings.TrimSpace(extra)
+	if extra == "" {
+		if sourceIP.Is4() {
+			extra = "icmp4"
+		} else {
+			extra = "icmp6"
+		}
+	} else if sourceIP.Is4() {
+		extra = plainICMPPattern.ReplaceAllString(extra, "icmp4")
+	} else {
+		extra = plainICMPPattern.ReplaceAllString(extra, "icmp6")
 	}
+	conditions = append(conditions, "("+extra+")")
 
 	return strings.Join(conditions, " && "), nil
 }

@@ -13,6 +13,8 @@ import (
 
 var ipv4IDPattern = regexp.MustCompile(`\bid\s+([0-9]+)\b`)
 
+const observationCaptureLimit = 64
+
 type observationSpec struct {
 	protocol        string
 	sourceIP        string
@@ -47,36 +49,40 @@ func Observe(
 
 	captureContext, cancelCaptures := context.WithCancel(ctx)
 	defer cancelCaptures()
-	sourceRequest := startCapture(
+	sourceRequest := startCaptureCount(
 		captureContext,
 		sourceClient,
 		ovsPath.Source.Interface,
 		spec.requestFilter,
 		timeout,
+		observationCaptureLimit,
 	)
-	destinationRequest := startCapture(
+	destinationRequest := startCaptureCount(
 		captureContext,
 		destinationClient,
 		ovsPath.Destination.Interface,
 		spec.requestFilter,
 		timeout,
+		observationCaptureLimit,
 	)
 	var destinationReply <-chan captureOutcome
 	var sourceReply <-chan captureOutcome
 	if spec.replyExpected {
-		destinationReply = startCapture(
+		destinationReply = startCaptureCount(
 			captureContext,
 			destinationClient,
 			ovsPath.Destination.Interface,
 			spec.replyFilter,
 			timeout,
+			observationCaptureLimit,
 		)
-		sourceReply = startCapture(
+		sourceReply = startCaptureCount(
 			captureContext,
 			sourceClient,
 			ovsPath.Source.Interface,
 			spec.replyFilter,
 			timeout,
+			observationCaptureLimit,
 		)
 	}
 
@@ -101,12 +107,8 @@ func Observe(
 	if err != nil {
 		return result, fmt.Errorf("observe packet at source: %w", err)
 	}
-	result.SourceObserved = !sourceObservation.TimedOut
+	result.SourceObserved = strings.TrimSpace(sourceObservation.Output) != ""
 	result.SourceCapture = sourceObservation.Output
-	if !result.SourceObserved {
-		result.Duration = time.Since(started)
-		return result, nil
-	}
 
 	destinationObservation, err := awaitCapture(
 		ctx,
@@ -119,14 +121,14 @@ func Observe(
 		)
 	}
 	result.RequestCapture = destinationObservation.Output
-	result.Delivered = !destinationObservation.TimedOut &&
-		capturesCorrelate(
-			sourceObservation.Output,
-			destinationObservation.Output,
-		)
-	result.Marker = captureMarker(sourceObservation.Output)
+	result.Marker = correlatedMarker(
+		sourceObservation.Output,
+		destinationObservation.Output,
+	)
+	result.Delivered = result.SourceObserved && result.Marker != ""
 
-	if spec.replyExpected {
+	if spec.replyExpected && result.Delivered {
+		result.ReplyGenerationAttempted = true
 		generated, err := awaitCapture(ctx, destinationReply)
 		if err != nil {
 			return result, fmt.Errorf(
@@ -134,9 +136,14 @@ func Observe(
 				err,
 			)
 		}
-		result.ReplyGenerated = !generated.TimedOut
+		result.ReplyGenerated = strings.TrimSpace(generated.Output) != ""
 		result.ReplyGeneratedCapture = generated.Output
 
+		if !result.ReplyGenerated {
+			result.Duration = time.Since(started)
+			return result, nil
+		}
+		result.ReplyObservationAttempted = true
 		returned, err := awaitCapture(ctx, sourceReply)
 		if err != nil {
 			return result, fmt.Errorf(
@@ -145,12 +152,10 @@ func Observe(
 			)
 		}
 		result.ReplyCapture = returned.Output
-		result.ReplyObserved = result.ReplyGenerated &&
-			!returned.TimedOut &&
-			capturesCorrelate(
-				generated.Output,
-				returned.Output,
-			)
+		result.ReplyObserved = correlatedMarker(
+			generated.Output,
+			returned.Output,
+		) != ""
 	}
 	result.Duration = time.Since(started)
 	return result, nil
@@ -167,12 +172,13 @@ func buildObservationSpec(
 	if err != nil {
 		return observationSpec{}, err
 	}
-	protocol := parseProtocol(microflow)
-	sourcePort := parsePort(sourcePortPattern, microflow)
-	destinationPort := parsePort(
-		destinationPortPattern,
-		microflow,
-	)
+	flow, err := parseProbeMicroflow(microflow)
+	if err != nil {
+		return observationSpec{}, err
+	}
+	protocol := flow.protocol
+	sourcePort := flow.sourcePort
+	destinationPort := flow.destinationPort
 	base := fmt.Sprintf(
 		"src host %s and dst host %s",
 		sourceIP,
@@ -212,13 +218,33 @@ func buildObservationSpec(
 }
 
 func capturesCorrelate(first string, second string) bool {
-	firstMarker := captureMarker(first)
-	secondMarker := captureMarker(second)
-	if firstMarker == "" || secondMarker == "" {
-		return strings.TrimSpace(first) != "" &&
-			strings.TrimSpace(second) != ""
+	return correlatedMarker(first, second) != ""
+}
+
+func correlatedMarker(first string, second string) string {
+	firstIDs := captureIDs(first)
+	if len(firstIDs) == 0 {
+		return ""
 	}
-	return firstMarker == secondMarker
+	for identifier := range captureIDs(second) {
+		if _, found := firstIDs[identifier]; found {
+			return "ipv4-id:" + identifier
+		}
+	}
+	return ""
+}
+
+func captureIDs(output string) map[string]struct{} {
+	result := make(map[string]struct{})
+	for _, matches := range ipv4IDPattern.FindAllStringSubmatch(
+		output,
+		-1,
+	) {
+		if len(matches) == 2 {
+			result[matches[1]] = struct{}{}
+		}
+	}
+	return result
 }
 
 func captureMarker(output string) string {

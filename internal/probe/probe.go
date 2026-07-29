@@ -53,8 +53,11 @@ func Run(
 			)
 		}
 	} else if err == nil &&
-		!neutronPath.Source.Endpoint.SameNetwork(
-			neutronPath.Destination.Endpoint,
+		topology.RequiresNextHop(
+			neutronPath.Source,
+			neutronPath.Destination,
+			packet.SourceIP,
+			packet.DestinationIP,
 		) {
 		_, _, gatewayIP, gatewayErr := sourceGateway(
 			neutronPath.Source,
@@ -145,6 +148,11 @@ func Run(
 	result.RequestCapture = request.Output
 
 	if replyCapture != nil {
+		if !result.Delivered {
+			result.Duration = time.Since(started)
+			return result, nil
+		}
+		result.ReplyGenerationAttempted = true
 		generatedReply, err := awaitCapture(
 			ctx,
 			replyGeneratedCapture,
@@ -159,6 +167,11 @@ func Run(
 		result.ReplyGenerated = !generatedReply.TimedOut
 		result.ReplyGeneratedCapture = generatedReply.Output
 
+		if !result.ReplyGenerated {
+			result.Duration = time.Since(started)
+			return result, nil
+		}
+		result.ReplyObservationAttempted = true
 		reply, err := awaitCapture(ctx, replyCapture)
 		if err != nil {
 			result.Duration = time.Since(started)
@@ -178,13 +191,25 @@ func startCapture(
 	filter string,
 	timeout time.Duration,
 ) <-chan captureOutcome {
+	return startCaptureCount(ctx, client, interfaceName, filter, timeout, 1)
+}
+
+func startCaptureCount(
+	ctx context.Context,
+	client *ovs.Client,
+	interfaceName string,
+	filter string,
+	timeout time.Duration,
+	maxPackets int,
+) <-chan captureOutcome {
 	result := make(chan captureOutcome, 1)
 	go func() {
-		capture, err := client.CapturePacket(
+		capture, err := client.CapturePackets(
 			ctx,
 			interfaceName,
 			filter,
 			timeout,
+			maxPackets,
 		)
 		result <- captureOutcome{result: capture, err: err}
 	}()

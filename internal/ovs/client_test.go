@@ -130,3 +130,37 @@ func TestCapturePacketRecognizesTimeout(t *testing.T) {
 		t.Fatalf("CapturePacket result = %+v", result)
 	}
 }
+
+func TestCapturePacketsPreservesPartialWindowOnTimeout(t *testing.T) {
+	t.Parallel()
+
+	timeoutError := &execx.CommandError{
+		ExitCode: 124,
+		Err:      errors.New("exit status 124"),
+	}
+	runner := &captureRunner{
+		result: execx.Result{
+			Stdout: "IP (id 42, proto ICMP), packet\n",
+			Stderr: "1 packet captured\n",
+		},
+		err: timeoutError,
+	}
+	client := NewClient(runner, Config{Host: "stack2"})
+	result, err := client.CapturePackets(
+		context.Background(),
+		"tap123",
+		"icmp",
+		100*time.Millisecond,
+		64,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TimedOut ||
+		result.Output != "IP (id 42, proto ICMP), packet" {
+		t.Fatalf("CapturePackets result = %+v", result)
+	}
+	if runner.args[len(runner.args)-2] != "64" {
+		t.Fatalf("capture count args = %v", runner.args)
+	}
+}

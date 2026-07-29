@@ -17,7 +17,7 @@ type packetSpec struct {
 
 var (
 	packetProtocolPattern = regexp.MustCompile(
-		`(?i)\b(tcp|udp|sctp|icmp4|icmp6)\b`,
+		`(?i)\b(tcp|udp|sctp|icmp|icmp4|icmp6)\b`,
 	)
 	packetDestinationPortPattern = regexp.MustCompile(
 		`(?i)\b(?:tcp|udp|sctp)\.dst\s*==\s*([0-9]+)`,
@@ -50,6 +50,19 @@ func parsePacketSpec(
 			spec.ipVersion = 4
 		} else {
 			spec.ipVersion = 6
+		}
+	}
+	if spec.protocol == "" {
+		if spec.ipVersion == 6 {
+			spec.protocol = "icmp6"
+		} else {
+			spec.protocol = "icmp4"
+		}
+	} else if spec.protocol == "icmp" {
+		if spec.ipVersion == 6 {
+			spec.protocol = "icmp6"
+		} else {
+			spec.protocol = "icmp4"
 		}
 	}
 	return spec

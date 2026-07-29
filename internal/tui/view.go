@@ -410,12 +410,15 @@ func (model Model) probeContent() string {
 	}
 	reply := "not expected"
 	if probe.ReplyExpected {
-		reply = "not generated"
-		if probe.ReplyGenerated {
+		reply = "not attempted"
+		if probe.ReplyGenerationAttempted {
+			reply = "not generated"
+		}
+		if probe.ReplyObservationAttempted {
 			reply = "generated, not delivered back"
-			if probe.ReplyObserved {
-				reply = "generated and delivered back"
-			}
+		}
+		if probe.ReplyObserved {
+			reply = "generated and delivered back"
 		}
 	}
 	nextHop := "direct destination"

@@ -72,6 +72,9 @@ func TestBuildMicroflowDifferentNetworksOmitsDestinationMAC(
 	if strings.Contains(flow, "eth.dst") {
 		t.Fatalf("routed flow should not assume destination MAC: %q", flow)
 	}
+	if !strings.Contains(flow, "(icmp4)") {
+		t.Fatalf("default flow should match ICMPv4: %q", flow)
+	}
 }
 
 func TestBuildMicroflowRejectsDifferentIPFamilies(t *testing.T) {

@@ -86,6 +86,32 @@ func TestBuildTraceFlowUsesExplicitNextHopMAC(t *testing.T) {
 	}
 }
 
+func TestBuildTraceFlowDefaultsPlainICMPToIPv4ICMP(t *testing.T) {
+	t.Parallel()
+
+	source := testEndpoint(
+		"source",
+		"fa:16:3e:00:00:01",
+		"network",
+		"10.0.0.10",
+	)
+	destination := testEndpoint(
+		"destination",
+		"fa:16:3e:00:00:02",
+		"network",
+		"10.0.0.20",
+	)
+	for _, microflow := range []string{"", "icmp"} {
+		flow, err := BuildTraceFlow(source, destination, 7, microflow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(flow, ",icmp,") {
+			t.Fatalf("flow for %q = %q", microflow, flow)
+		}
+	}
+}
+
 func testEndpoint(
 	portID string,
 	macAddress string,

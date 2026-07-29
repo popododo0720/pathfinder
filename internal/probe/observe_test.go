@@ -100,3 +100,21 @@ func TestCapturesCorrelateByIPv4ID(t *testing.T) {
 		t.Fatal("different IPv4 IDs correlated")
 	}
 }
+
+func TestCapturesCorrelateAcrossPacketWindows(t *testing.T) {
+	t.Parallel()
+
+	first := "IP (id 10, proto ICMP)\nIP (id 42, proto ICMP)"
+	second := "IP (id 41, proto ICMP)\nIP (id 42, proto ICMP)"
+	if marker := correlatedMarker(first, second); marker != "ipv4-id:42" {
+		t.Fatalf("correlatedMarker = %q", marker)
+	}
+}
+
+func TestCapturesWithoutIPv4IDDoNotCorrelate(t *testing.T) {
+	t.Parallel()
+
+	if capturesCorrelate("matching packet", "another matching packet") {
+		t.Fatal("captures without a correlation key were accepted")
+	}
+}

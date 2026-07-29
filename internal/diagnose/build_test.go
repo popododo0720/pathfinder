@@ -59,15 +59,17 @@ func TestBuildLiveProbeVerifiesExternalPhysicalPath(t *testing.T) {
 	path.Destination.Network.PhysicalNetwork = "external"
 	path.Destination.Network.SegmentationID = "55"
 	probe := topology.ProbeResult{
-		Protocol:       "icmp",
-		SourceIP:       "192.168.0.78",
-		DestinationIP:  "192.168.55.148",
-		Injected:       true,
-		Delivered:      true,
-		ReplyExpected:  true,
-		ReplyGenerated: true,
-		ReplyObserved:  true,
-		Marker:         "icmp-id:42",
+		Protocol:                  "icmp",
+		SourceIP:                  "192.168.0.78",
+		DestinationIP:             "192.168.55.148",
+		Injected:                  true,
+		Delivered:                 true,
+		ReplyExpected:             true,
+		ReplyGenerationAttempted:  true,
+		ReplyGenerated:            true,
+		ReplyObservationAttempted: true,
+		ReplyObserved:             true,
+		Marker:                    "icmp-id:42",
 	}
 	ovsPath := topology.OVSPath{
 		Source: topology.OVSEndpoint{
@@ -238,17 +240,19 @@ func TestBuildReportsDeliveredLiveProbe(t *testing.T) {
 
 	path := testNeutronPath("network", "network")
 	probe := topology.ProbeResult{
-		Protocol:        "tcp",
-		SourceIP:        "192.0.2.10",
-		DestinationIP:   "192.0.2.20",
-		SourcePort:      45000,
-		DestinationPort: 443,
-		Injected:        true,
-		Delivered:       true,
-		ReplyExpected:   true,
-		ReplyGenerated:  true,
-		ReplyObserved:   true,
-		Marker:          "tcp:45000->443",
+		Protocol:                  "tcp",
+		SourceIP:                  "192.0.2.10",
+		DestinationIP:             "192.0.2.20",
+		SourcePort:                45000,
+		DestinationPort:           443,
+		Injected:                  true,
+		Delivered:                 true,
+		ReplyExpected:             true,
+		ReplyGenerationAttempted:  true,
+		ReplyGenerated:            true,
+		ReplyObservationAttempted: true,
+		ReplyObserved:             true,
+		Marker:                    "tcp:45000->443",
 	}
 	result := Build(Input{
 		Neutron:        path,
@@ -280,13 +284,15 @@ func TestBuildFailsWhenExpectedReplyIsNotObserved(t *testing.T) {
 
 	path := testNeutronPath("network", "network")
 	probe := topology.ProbeResult{
-		Protocol:       "icmp",
-		Injected:       true,
-		Delivered:      true,
-		ReplyExpected:  true,
-		ReplyGenerated: true,
-		ReplyObserved:  false,
-		Marker:         "icmp-id:42",
+		Protocol:                  "icmp",
+		Injected:                  true,
+		Delivered:                 true,
+		ReplyExpected:             true,
+		ReplyGenerationAttempted:  true,
+		ReplyGenerated:            true,
+		ReplyObservationAttempted: true,
+		ReplyObserved:             false,
+		Marker:                    "icmp-id:42",
 	}
 	result := Build(Input{
 		Neutron:        path,
@@ -330,6 +336,59 @@ func TestBuildPassesCorrelatedObservedTraffic(t *testing.T) {
 	}
 	if !hasHop(result, "live-probe", StatusPass) {
 		t.Fatalf("observed traffic hop not found: %v", result.Hops)
+	}
+}
+
+func TestBuildObserveProbeVerifiesExternalPhysicalPath(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("source-network", "destination-network")
+	path.Source.Network.External = true
+	path.Source.Network.PhysicalNetwork = "external"
+	path.Source.Network.SegmentationID = "192"
+	path.Destination.Network.External = true
+	path.Destination.Network.PhysicalNetwork = "external"
+	path.Destination.Network.SegmentationID = "55"
+	probe := topology.ProbeResult{
+		Mode:           "observe",
+		Protocol:       "icmp",
+		SourceIP:       "192.168.0.78",
+		DestinationIP:  "192.168.55.148",
+		SourceObserved: true,
+		Delivered:      true,
+		Marker:         "ipv4-id:42",
+	}
+	result := Build(Input{
+		Neutron:        path,
+		Probe:          &probe,
+		ProbeRequested: true,
+		Microflow:      "icmp",
+	})
+	if !hasHop(result, "transport", StatusPass) {
+		t.Fatalf("verified transport hop not found: %v", result.Hops)
+	}
+}
+
+func TestBuildMarksUnattemptedReplyStagesUnknown(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	probe := topology.ProbeResult{
+		Mode:          "observe",
+		Protocol:      "icmp",
+		ReplyExpected: true,
+	}
+	result := Build(Input{
+		Neutron:        path,
+		Probe:          &probe,
+		ProbeRequested: true,
+		Microflow:      "icmp",
+	})
+	if !hasHop(result, "reply-generation", StatusUnknown) {
+		t.Fatalf("reply-generation hop = %v", result.Hops)
+	}
+	if !hasHop(result, "return-probe", StatusUnknown) {
+		t.Fatalf("return-probe hop = %v", result.Hops)
 	}
 }
 
