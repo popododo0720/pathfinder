@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
 type Result struct {
@@ -63,6 +65,8 @@ func (err *CommandError) Error() string {
 	}
 	if err.Stderr != "" {
 		message += ": " + strings.TrimSpace(err.Stderr)
+	} else if err.Err != nil {
+		message += ": " + err.Err.Error()
 	}
 	return message
 }
@@ -90,6 +94,7 @@ func (runner SystemRunner) Run(
 	}
 
 	command := exec.CommandContext(ctx, commandName, commandArgs...)
+	configureCommandCancellation(command)
 	if runner.SSH.Password != "" {
 		command.Env = append(
 			os.Environ(),
@@ -116,12 +121,16 @@ func (runner SystemRunner) Run(
 		exitCode = exitError.ExitCode()
 	}
 
+	cause := err
+	if ctx.Err() != nil {
+		cause = ctx.Err()
+	}
 	return result, &CommandError{
 		Host:     host,
 		Command:  formatCommand(name, args),
 		ExitCode: exitCode,
 		Stderr:   result.Stderr,
-		Err:      err,
+		Err:      cause,
 	}
 }
 
@@ -145,7 +154,11 @@ func (runner SystemRunner) sshArgs(
 	if !runner.SSH.DisableControl {
 		controlPath := runner.SSH.ControlPath
 		if controlPath == "" {
-			controlPath = "/tmp/pathfinder-ssh-%C"
+			mode := "accept-new"
+			if runner.SSH.StrictHostKey {
+				mode = "strict"
+			}
+			controlPath = "/tmp/pathfinder-ssh-%C-" + mode
 		}
 		sshArgs = append(
 			sshArgs,
@@ -165,9 +178,7 @@ func (runner SystemRunner) sshArgs(
 		sshArgs = append(
 			sshArgs,
 			"-o",
-			"StrictHostKeyChecking=no",
-			"-o",
-			"UserKnownHostsFile=/dev/null",
+			"StrictHostKeyChecking=accept-new",
 		)
 	}
 	if runner.SSH.Port > 0 && runner.SSH.Port != 22 {
@@ -196,6 +207,21 @@ func (runner SystemRunner) sshArgs(
 		"--",
 		formatCommand(name, args),
 	)
+}
+
+func configureCommandCancellation(command *exec.Cmd) {
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.Cancel = func() error {
+		if command.Process == nil {
+			return os.ErrProcessDone
+		}
+		err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+	command.WaitDelay = 2 * time.Second
 }
 
 func formatCommand(name string, args []string) string {

@@ -134,7 +134,7 @@ func (flags *analysisFlags) addDoctorInfrastructureTo(
 		&flags.sshStrictHostKey,
 		"ssh-strict-host-key",
 		false,
-		"require SSH host keys to match known_hosts",
+		"require a pre-existing known_hosts key (default: accept new once)",
 	)
 	command.Flags().StringVar(
 		&flags.containerEngine,

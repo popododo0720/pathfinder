@@ -1,8 +1,11 @@
 package execx
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestShellQuote(t *testing.T) {
@@ -53,10 +56,26 @@ func TestSSHArgsEnableConnectionReuse(t *testing.T) {
 	for _, expected := range []string{
 		"ControlMaster=auto",
 		"ControlPersist=60s",
-		"ControlPath=/tmp/pathfinder-ssh-%C",
+		"ControlPath=/tmp/pathfinder-ssh-%C-accept-new",
+		"StrictHostKeyChecking=accept-new",
 	} {
 		if !slices.Contains(args, expected) {
 			t.Errorf("ssh args do not contain %q: %v", expected, args)
+		}
+	}
+}
+
+func TestSSHArgsStrictModeUsesSeparateControlSocket(t *testing.T) {
+	t.Parallel()
+
+	runner := SystemRunner{SSH: SSHConfig{StrictHostKey: true}}
+	args := runner.sshArgs("stack1", "hostname", nil)
+	for _, expected := range []string{
+		"ControlPath=/tmp/pathfinder-ssh-%C-strict",
+		"StrictHostKeyChecking=yes",
+	} {
+		if !slices.Contains(args, expected) {
+			t.Errorf("strict ssh args do not contain %q: %v", expected, args)
 		}
 	}
 }
@@ -72,5 +91,32 @@ func TestSSHArgsCanDisableConnectionReuse(t *testing.T) {
 	args := runner.sshArgs("stack1", "hostname", nil)
 	if slices.Contains(args, "ControlMaster=auto") {
 		t.Fatalf("connection reuse was not disabled: %v", args)
+	}
+}
+
+func TestSystemRunnerCancellationStopsCommandGroup(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		50*time.Millisecond,
+	)
+	defer cancel()
+	started := time.Now()
+	_, err := (SystemRunner{}).Run(
+		ctx,
+		"",
+		"sh",
+		"-c",
+		"sleep 30 & wait",
+	)
+	if err == nil {
+		t.Fatal("canceled command succeeded")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("canceled command error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("canceled command took %s", elapsed)
 	}
 }
