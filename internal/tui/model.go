@@ -32,6 +32,11 @@ type analysisFinishedMsg struct {
 	err        error
 }
 
+type tabViewState struct {
+	rawView  bool
+	expanded bool
+}
+
 type Model struct {
 	parentContext context.Context
 	cancel        context.CancelFunc
@@ -45,6 +50,7 @@ type Model struct {
 	selected      int
 	rawView       bool
 	expanded      bool
+	viewStates    [tabCount]tabViewState
 	searching     bool
 	searchValue   string
 	searchQuery   string
@@ -125,8 +131,7 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.err = message.err
 		model.result = &message.result
 		model.selected = 0
-		model.rawView = false
-		model.expanded = false
+		model.resetViewStates()
 		model.resetSearch()
 		model.refreshViewport()
 		return model, nil
@@ -179,8 +184,7 @@ func (model *Model) handleKey(
 		}
 		model.loading = true
 		model.err = nil
-		model.rawView = false
-		model.expanded = false
+		model.resetViewStates()
 		model.resetSearch()
 		model.started = time.Now()
 		model.generation++
@@ -189,32 +193,27 @@ func (model *Model) handleKey(
 			model.analysisCommand(),
 		)
 	case "tab", "l", "right":
-		model.tab = (model.tab + 1) % tabCount
-		model.refreshViewport()
+		model.switchTab((model.tab + 1) % tabCount)
 		return model, nil
 	case "shift+tab", "h", "left":
-		model.tab = (model.tab + tabCount - 1) % tabCount
-		model.refreshViewport()
+		model.switchTab((model.tab + tabCount - 1) % tabCount)
 		return model, nil
 	case "1":
-		model.tab = pathTab
-		model.refreshViewport()
+		model.switchTab(pathTab)
 		return model, nil
 	case "2":
-		model.tab = ovnTab
-		model.refreshViewport()
+		model.switchTab(ovnTab)
 		return model, nil
 	case "3":
-		model.tab = ovsTab
-		model.refreshViewport()
+		model.switchTab(ovsTab)
 		return model, nil
 	case "4":
-		model.tab = probeTab
-		model.refreshViewport()
+		model.switchTab(probeTab)
 		return model, nil
 	case "v":
 		if model.tab != pathTab {
 			model.rawView = !model.rawView
+			model.saveActiveViewState()
 			model.refreshViewport()
 		}
 		return model, nil
@@ -237,6 +236,7 @@ func (model *Model) handleKey(
 		if !model.rawView &&
 			(model.tab == ovnTab || model.tab == ovsTab) {
 			model.expanded = !model.expanded
+			model.saveActiveViewState()
 			model.refreshViewport()
 		}
 		return model, nil
@@ -280,6 +280,45 @@ func (model *Model) handleKey(
 		return model, nil
 	}
 	return model, nil
+}
+
+func (model *Model) switchTab(next tab) {
+	if next == model.tab {
+		model.refreshViewport()
+		return
+	}
+	model.saveActiveViewState()
+	model.tab = next
+	model.restoreActiveViewState()
+	model.resetSearch()
+	model.refreshViewport()
+}
+
+func (model *Model) saveActiveViewState() {
+	if model.tab < 0 || model.tab >= tabCount {
+		return
+	}
+	model.viewStates[model.tab] = tabViewState{
+		rawView:  model.rawView,
+		expanded: model.expanded,
+	}
+}
+
+func (model *Model) restoreActiveViewState() {
+	if model.tab < 0 || model.tab >= tabCount {
+		model.rawView = false
+		model.expanded = false
+		return
+	}
+	state := model.viewStates[model.tab]
+	model.rawView = state.rawView
+	model.expanded = state.expanded
+}
+
+func (model *Model) resetViewStates() {
+	model.viewStates = [tabCount]tabViewState{}
+	model.rawView = false
+	model.expanded = false
 }
 
 func (model *Model) moveSelection(delta int) {

@@ -9,6 +9,7 @@ import (
 	"pathfinder/internal/engine"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func (model Model) loadingView() string {
@@ -55,6 +56,29 @@ func (model Model) readyView() string {
 			Render(model.viewport.View())
 	}
 
+	help := model.footerView()
+	body := lipgloss.JoinVertical(
+		lipgloss.Left,
+		header,
+		tabs,
+		content,
+		help,
+	)
+	return appStyle.
+		Width(max(model.width-2, 1)).
+		Height(max(model.height, 1)).
+		Render(body)
+}
+
+func (model Model) footerView() string {
+	width := max(
+		model.width-appStyle.GetHorizontalFrameSize(),
+		1,
+	)
+	if model.searching {
+		return model.searchFooterView(width)
+	}
+
 	helpText := "1/2/3/4 or h/l: tabs  •  j/k: select/scroll  •  " +
 		"g/G: top/bottom  •  r: rerun  •  q: quit"
 	if model.tab != pathTab {
@@ -75,24 +99,54 @@ func (model Model) readyView() string {
 	if status := model.searchStatus(); status != "" {
 		helpText += "  •  " + status + "  •  n/N: next/previous"
 	}
-	help := helpStyle.Render(helpText)
-	if model.searching {
-		help = titleStyle.Render("/ ") +
-			model.searchValue +
-			traceForwardStyle.Render("█") +
-			helpStyle.Render("  enter: find  •  esc: cancel")
-	}
-	body := lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		tabs,
-		content,
-		help,
+	return ansi.Truncate(
+		helpStyle.Render(helpText),
+		width,
+		"…",
 	)
-	return appStyle.
-		Width(max(model.width-2, 1)).
-		Height(max(model.height, 1)).
-		Render(body)
+}
+
+func (model Model) searchFooterView(width int) string {
+	prefix := titleStyle.Render("/ ")
+	cursor := traceForwardStyle.Render("█")
+	hint := ""
+	if width >= 36 {
+		hint = helpStyle.Render("  enter: find  •  esc: cancel")
+	} else if width >= 24 {
+		hint = helpStyle.Render("  enter  •  esc")
+	}
+
+	inputWidth := max(
+		width-ansi.StringWidth(prefix)-
+			ansi.StringWidth(cursor)-
+			ansi.StringWidth(hint),
+		0,
+	)
+	value := trailingSearchValue(model.searchValue, inputWidth)
+	return ansi.Truncate(
+		prefix+value+cursor+hint,
+		width,
+		"",
+	)
+}
+
+func trailingSearchValue(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	valueWidth := ansi.StringWidth(value)
+	if valueWidth <= width {
+		return value
+	}
+	if width == 1 {
+		return "…"
+	}
+	removeWidth := valueWidth - (width - 1)
+	return ansi.Truncate(
+		ansi.TruncateLeft(value, removeWidth, "…"),
+		width,
+		"",
+	)
 }
 
 func (model Model) headerView() string {

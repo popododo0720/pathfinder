@@ -364,7 +364,7 @@ func traceOutcomeStyle(outcome traceOutcome) lipgloss.Style {
 }
 
 func (model Model) traceTextWidth() int {
-	return max(model.viewport.Width-8, 16)
+	return max(model.viewport.Width-8, 1)
 }
 
 func compactTraceText(value string, width int) string {

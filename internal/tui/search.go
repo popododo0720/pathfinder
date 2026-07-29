@@ -3,9 +3,13 @@ package tui
 import (
 	"strconv"
 	"strings"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
+
+const maxSearchRunes = 160
 
 type traceSearchMatch struct {
 	line   int
@@ -14,7 +18,7 @@ type traceSearchMatch struct {
 
 func (model *Model) startSearch() (tea.Model, tea.Cmd) {
 	model.searching = true
-	model.searchValue = model.searchQuery
+	model.searchValue = limitSearchRunes(model.searchQuery)
 	return model, nil
 }
 
@@ -50,9 +54,25 @@ func (model *Model) handleSearchKey(
 		return model, nil
 	}
 	if message.Type == tea.KeyRunes {
-		model.searchValue += string(message.Runes)
+		characters := []rune(model.searchValue)
+		remaining := maxSearchRunes - len(characters)
+		if remaining > 0 {
+			incoming := message.Runes
+			if len(incoming) > remaining {
+				incoming = incoming[:remaining]
+			}
+			model.searchValue += string(incoming)
+		}
 	}
 	return model, nil
+}
+
+func limitSearchRunes(value string) string {
+	characters := []rune(value)
+	if len(characters) <= maxSearchRunes {
+		return value
+	}
+	return string(characters[:maxSearchRunes])
 }
 
 func (model *Model) resetSearch() {
@@ -118,27 +138,52 @@ func (model Model) searchStatus() string {
 }
 
 func findTraceMatches(content string, query string) []traceSearchMatch {
-	query = strings.ToLower(strings.TrimSpace(query))
-	if query == "" {
+	queryRunes := lowerRunes(strings.TrimSpace(query))
+	if len(queryRunes) == 0 {
 		return nil
 	}
 	var matches []traceSearchMatch
 	for lineIndex, line := range strings.Split(content, "\n") {
-		plain := ansiEscapePattern.ReplaceAllString(line, "")
-		lower := strings.ToLower(plain)
-		offset := 0
-		for offset <= len(lower) {
-			index := strings.Index(lower[offset:], query)
-			if index < 0 {
-				break
+		plain := ansi.Strip(line)
+		plainRunes := []rune(plain)
+		lineRunes := make([]rune, len(plainRunes))
+		for index, character := range plainRunes {
+			lineRunes[index] = unicode.ToLower(character)
+		}
+		for offset := 0; offset+len(queryRunes) <= len(lineRunes); {
+			if !equalRunes(
+				lineRunes[offset:offset+len(queryRunes)],
+				queryRunes,
+			) {
+				offset++
+				continue
 			}
-			column := offset + index
 			matches = append(matches, traceSearchMatch{
 				line:   lineIndex,
-				column: column,
+				column: ansi.StringWidth(string(plainRunes[:offset])),
 			})
-			offset = column + max(len(query), 1)
+			offset += len(queryRunes)
 		}
 	}
 	return matches
+}
+
+func lowerRunes(value string) []rune {
+	characters := []rune(value)
+	for index, character := range characters {
+		characters[index] = unicode.ToLower(character)
+	}
+	return characters
+}
+
+func equalRunes(left []rune, right []rune) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
