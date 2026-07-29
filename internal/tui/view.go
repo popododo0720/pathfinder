@@ -403,73 +403,10 @@ func (model Model) probeContent() string {
 	if model.result.Probe == nil {
 		return "LIVE PROBE\n\nNo result"
 	}
-	probe := model.result.Probe
-	mode := "LIVE"
-	if probe.Mode == "observe" {
-		mode = "OBSERVE"
+	if model.rawView {
+		return model.probeDetailContent()
 	}
-	status := "NOT DELIVERED"
-	if probe.Delivered {
-		status = "DELIVERED"
-	}
-	errorDetail := ""
-	if model.result.ProbeError != nil {
-		status = "ERROR"
-		errorDetail = "\nCause: " + model.result.ProbeError.Error()
-	}
-	reply := "not expected"
-	if probe.ReplyExpected {
-		reply = "not attempted"
-		if probe.ReplyGenerationAttempted {
-			reply = "not generated"
-		}
-		if probe.ReplyObservationAttempted {
-			reply = "generated, not delivered back"
-		}
-		if probe.ReplyObserved {
-			reply = "generated and delivered back"
-		}
-	}
-	nextHop := "direct destination"
-	if probe.NextHopIP != "" || probe.NextHopMACSource != "" {
-		nextHop = fmt.Sprintf(
-			"%s (%s; %s)",
-			probe.DestinationMAC,
-			probe.NextHopIP,
-			probe.NextHopMACSource,
-		)
-	}
-	sourceObservation := "not attempted (packet-out enters source OVS directly)"
-	if probe.SourceObservationAttempted {
-		sourceObservation = "no matching packet observed"
-		if probe.SourceObserved {
-			sourceObservation = "matching packet observed"
-		}
-	}
-	return fmt.Sprintf(
-		"%s: %s%s\n\nMethod: %s\nMarker: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nNext hop: %s\nInjected: %t\nSource tap: %s\nExact destination capture: %t\nReply: %s\nDuration: %s\n\nRequest filter:\n%s\n\nReply filter:\n%s\n\n%s",
-		mode,
-		status,
-		errorDetail,
-		probe.Method,
-		probe.Marker,
-		probe.Protocol,
-		probe.SourceIP,
-		probe.SourcePort,
-		probe.SourceMAC,
-		probe.DestinationIP,
-		probe.DestinationPort,
-		probe.DestinationMAC,
-		nextHop,
-		probe.Injected,
-		sourceObservation,
-		probe.Delivered,
-		reply,
-		shortDuration(probe.Duration),
-		probe.RequestFilter,
-		probe.ReplyFilter,
-		probe.DetectionDescription,
-	)
+	return model.probeSummaryContent()
 }
 
 func shortDuration(duration time.Duration) string {

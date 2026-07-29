@@ -82,17 +82,27 @@ func TestModelSwitchesToTraceTabs(t *testing.T) {
 	}
 
 	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
-	if !strings.Contains(model.View(), "LIVE: DELIVERED") {
-		t.Fatalf("probe result is missing:\n%s", model.View())
+	if !strings.Contains(model.traceContent(), "LIVE PROBE") ||
+		!strings.Contains(model.traceContent(), "[PASS]") {
+		t.Fatalf("probe result is missing:\n%s", model.traceContent())
 	}
 	if !strings.Contains(
-		model.View(),
-		"Source tap: not attempted (packet-out enters source OVS directly)",
+		model.traceContent(),
+		"Source tap observation",
+	) || !strings.Contains(
+		model.traceContent(),
+		"intentionally",
 	) {
-		t.Fatalf("live source evidence is misleading:\n%s", model.View())
+		t.Fatalf(
+			"live source evidence is misleading:\n%s",
+			model.traceContent(),
+		)
 	}
-	if strings.Contains(model.View(), "RAW_CAPTURE_MUST_NOT_RENDER") {
-		t.Fatalf("raw capture was rendered:\n%s", model.View())
+	if strings.Contains(
+		model.traceContent(),
+		"RAW_CAPTURE_MUST_NOT_RENDER",
+	) {
+		t.Fatalf("raw capture was rendered:\n%s", model.traceContent())
 	}
 }
 
@@ -215,10 +225,11 @@ func TestObserveModeShowsObservedTraffic(t *testing.T) {
 	})
 	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 
-	view := model.View()
-	if !strings.Contains(view, "OBSERVE") ||
-		!strings.Contains(view, "Source tap: matching packet observed") {
-		t.Fatalf("observe mode is not clear:\n%s", view)
+	content := model.traceContent()
+	if !strings.Contains(content, "OBSERVE PROBE") ||
+		!strings.Contains(content, "Source traffic observation") ||
+		!strings.Contains(content, "matching guest traffic") {
+		t.Fatalf("observe mode is not clear:\n%s", content)
 	}
 }
 
@@ -228,6 +239,12 @@ func TestProbeTabShowsCauseAndPartialProgress(t *testing.T) {
 	model := testModel()
 	result := testResult()
 	result.Probe.Delivered = false
+	result.Probe.ReplyGenerationAttempted = false
+	result.Probe.ReplyGenerated = false
+	result.Probe.ReplyObservationAttempted = false
+	result.Probe.ReplyObserved = false
+	result.Probe.FailureStage =
+		topology.ProbeFailureDeliveryCapture
 	result.ProbeError = errors.New(
 		"capture on tap-destination: tcpdump permission denied",
 	)
@@ -238,11 +255,75 @@ func TestProbeTabShowsCauseAndPartialProgress(t *testing.T) {
 	})
 	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
 
-	view := model.View()
-	if !strings.Contains(view, "LIVE: ERROR") ||
-		!strings.Contains(view, "tcpdump permission denied") ||
-		!strings.Contains(view, "Injected: true") {
-		t.Fatalf("partial probe cause/progress is missing:\n%s", view)
+	content := model.traceContent()
+	if !strings.Contains(content, "LIVE PROBE") ||
+		!strings.Contains(content, "[ERROR]") ||
+		!strings.Contains(content, "tcpdump permission denied") ||
+		!strings.Contains(content, "[PASS] Source OVS packet injection") ||
+		!strings.Contains(content, "[ERROR] Destination request delivery") {
+		t.Fatalf(
+			"partial probe cause/progress is missing:\n%s",
+			content,
+		)
+	}
+}
+
+func TestProbeDetailsNeverRenderRawPacketCaptures(t *testing.T) {
+	t.Parallel()
+
+	model := testModel()
+	model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	model.Update(analysisFinishedMsg{
+		generation: model.generation,
+		result:     testResult(),
+	})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+	if strings.Contains(model.traceContent(), "Request filter:") {
+		t.Fatalf(
+			"filters are visible in the summary:\n%s",
+			model.traceContent(),
+		)
+	}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	content := model.traceContent()
+	if !strings.Contains(content, "DETAILS") ||
+		!strings.Contains(content, "Request filter:") ||
+		!strings.Contains(content, "tcp dst port 443") {
+		t.Fatalf("probe details are missing:\n%s", content)
+	}
+	if strings.Contains(content, "RAW_CAPTURE_MUST_NOT_RENDER") {
+		t.Fatalf("raw packet capture was rendered:\n%s", content)
+	}
+}
+
+func TestUDPProbeTimelineSkipsReplyStages(t *testing.T) {
+	t.Parallel()
+
+	model := testModel()
+	result := testResult()
+	result.Probe.Protocol = "udp"
+	result.Probe.ReplyExpected = false
+	result.Probe.ReplyGenerationAttempted = false
+	result.Probe.ReplyGenerated = false
+	result.Probe.ReplyObservationAttempted = false
+	result.Probe.ReplyObserved = false
+	model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	model.Update(analysisFinishedMsg{
+		generation: model.generation,
+		result:     result,
+	})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+
+	content := model.traceContent()
+	if !strings.Contains(
+		content,
+		"[SKIP] Destination reply generation",
+	) || !strings.Contains(
+		content,
+		"[SKIP] Return packet delivery",
+	) {
+		t.Fatalf("UDP reply stages are misleading:\n%s", content)
 	}
 }
 
@@ -391,25 +472,27 @@ OVS_RAW_SENTINEL`,
 		},
 		ProbeRequested: true,
 		Probe: &topology.ProbeResult{
-			Method:               "ovs packet-out",
-			Protocol:             "tcp",
-			SourceIP:             "192.0.2.10",
-			DestinationIP:        "192.0.2.20",
-			SourcePort:           45000,
-			DestinationPort:      443,
-			SourceMAC:            "fa:16:3e:00:00:01",
-			DestinationMAC:       "fa:16:3e:00:00:02",
-			Injected:             true,
-			Delivered:            true,
-			ReplyExpected:        true,
-			ReplyGenerated:       true,
-			ReplyObserved:        true,
-			Marker:               "tcp:45000->443",
-			RequestFilter:        "tcp dst port 443",
-			RequestCapture:       "RAW_CAPTURE_MUST_NOT_RENDER",
-			ReplyFilter:          "tcp src port 443",
-			Duration:             100 * time.Millisecond,
-			DetectionDescription: "exact packet capture",
+			Method:                    "ovs packet-out",
+			Protocol:                  "tcp",
+			SourceIP:                  "192.0.2.10",
+			DestinationIP:             "192.0.2.20",
+			SourcePort:                45000,
+			DestinationPort:           443,
+			SourceMAC:                 "fa:16:3e:00:00:01",
+			DestinationMAC:            "fa:16:3e:00:00:02",
+			Injected:                  true,
+			Delivered:                 true,
+			ReplyExpected:             true,
+			ReplyGenerationAttempted:  true,
+			ReplyGenerated:            true,
+			ReplyObservationAttempted: true,
+			ReplyObserved:             true,
+			Marker:                    "tcp:45000->443",
+			RequestFilter:             "tcp dst port 443",
+			RequestCapture:            "RAW_CAPTURE_MUST_NOT_RENDER",
+			ReplyFilter:               "tcp src port 443",
+			Duration:                  100 * time.Millisecond,
+			DetectionDescription:      "exact packet capture",
 		},
 		Diagnosis: diagnose.Report{
 			Verdict: diagnose.StatusWarning,
