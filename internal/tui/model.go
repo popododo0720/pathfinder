@@ -39,19 +39,24 @@ type Model struct {
 	options       engine.Options
 	analyze       Analyzer
 
-	spinner    spinner.Model
-	viewport   viewport.Model
-	tab        tab
-	selected   int
-	rawView    bool
-	expanded   bool
-	width      int
-	height     int
-	loading    bool
-	started    time.Time
-	generation int
-	result     *engine.Result
-	err        error
+	spinner       spinner.Model
+	viewport      viewport.Model
+	tab           tab
+	selected      int
+	rawView       bool
+	expanded      bool
+	searching     bool
+	searchValue   string
+	searchQuery   string
+	searchMatches []traceSearchMatch
+	searchIndex   int
+	width         int
+	height        int
+	loading       bool
+	started       time.Time
+	generation    int
+	result        *engine.Result
+	err           error
 }
 
 func NewModel(
@@ -122,6 +127,7 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.selected = 0
 		model.rawView = false
 		model.expanded = false
+		model.resetSearch()
 		model.refreshViewport()
 		return model, nil
 
@@ -158,6 +164,9 @@ func (model *Model) View() string {
 func (model *Model) handleKey(
 	message tea.KeyMsg,
 ) (tea.Model, tea.Cmd) {
+	if model.searching {
+		return model.handleSearchKey(message)
+	}
 	switch message.String() {
 	case "q", "ctrl+c":
 		if model.cancel != nil {
@@ -172,6 +181,7 @@ func (model *Model) handleKey(
 		model.err = nil
 		model.rawView = false
 		model.expanded = false
+		model.resetSearch()
 		model.started = time.Now()
 		model.generation++
 		return model, tea.Batch(
@@ -206,6 +216,21 @@ func (model *Model) handleKey(
 		if model.tab != pathTab {
 			model.rawView = !model.rawView
 			model.refreshViewport()
+		}
+		return model, nil
+	case "/":
+		if model.tab != pathTab {
+			return model.startSearch()
+		}
+		return model, nil
+	case "n":
+		if model.tab != pathTab {
+			model.moveSearch(1)
+		}
+		return model, nil
+	case "N":
+		if model.tab != pathTab {
+			model.moveSearch(-1)
 		}
 		return model, nil
 	case "e":
@@ -314,4 +339,8 @@ func (model *Model) refreshViewport() {
 	model.viewport.SetContent(model.traceContent())
 	model.viewport.GotoTop()
 	model.viewport.ScrollLeft(1 << 20)
+	model.refreshSearchMatches()
+	if model.searchQuery != "" && len(model.searchMatches) > 0 {
+		model.jumpToSearchMatch()
+	}
 }

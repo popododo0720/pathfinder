@@ -59,7 +59,7 @@ func (model Model) readyView() string {
 		"g/G: top/bottom  •  r: rerun  •  q: quit"
 	if model.tab != pathTab {
 		helpText = "1/2/3/4 or h/l: tabs  •  j/k: scroll  •  " +
-			"H/L: horizontal  •  v: change view"
+			"H/L: horizontal  •  v: change view  •  /: search"
 		if !model.rawView &&
 			(model.tab == ovnTab || model.tab == ovsTab) {
 			helpText += "  •  e: expand"
@@ -69,10 +69,19 @@ func (model Model) readyView() string {
 	if model.width < 110 {
 		helpText = "h/l tabs  •  j/k move  •  r rerun  •  q quit"
 		if model.tab != pathTab {
-			helpText = "h/l tabs  •  j/k scroll  •  v view  •  q quit"
+			helpText = "h/l tabs  •  j/k scroll  •  v view  •  / find  •  q quit"
 		}
 	}
+	if status := model.searchStatus(); status != "" {
+		helpText += "  •  " + status + "  •  n/N: next/previous"
+	}
 	help := helpStyle.Render(helpText)
+	if model.searching {
+		help = titleStyle.Render("/ ") +
+			model.searchValue +
+			traceForwardStyle.Render("█") +
+			helpStyle.Render("  enter: find  •  esc: cancel")
+	}
 	body := lipgloss.JoinVertical(
 		lipgloss.Left,
 		header,

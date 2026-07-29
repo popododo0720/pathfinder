@@ -183,6 +183,71 @@ func TestNewAnalysisResetsTraceViewMode(t *testing.T) {
 	}
 }
 
+func TestTraceSearchJumpsAndCyclesMatches(t *testing.T) {
+	t.Parallel()
+
+	model := testModel()
+	model.Update(tea.WindowSizeMsg{Width: 80, Height: 14})
+	model.Update(analysisFinishedMsg{
+		generation: model.generation,
+		result:     testResult(),
+	})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	if !model.searching {
+		t.Fatal("search mode did not start")
+	}
+	model.Update(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("source"),
+	})
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.searchQuery != "source" ||
+		len(model.searchMatches) < 2 ||
+		model.searchIndex != 0 {
+		t.Fatalf(
+			"unexpected search state: query=%q matches=%d index=%d",
+			model.searchQuery,
+			len(model.searchMatches),
+			model.searchIndex,
+		)
+	}
+	firstOffset := model.viewport.YOffset
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if model.searchIndex != 1 {
+		t.Fatalf("next match index = %d, want 1", model.searchIndex)
+	}
+	if model.viewport.YOffset == firstOffset &&
+		model.searchMatches[0].line != model.searchMatches[1].line {
+		t.Fatal("next match did not move the viewport")
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	if model.searchIndex != 0 {
+		t.Fatalf("previous match index = %d, want 0", model.searchIndex)
+	}
+	if !strings.Contains(model.View(), "/source") {
+		t.Fatalf("search status is missing:\n%s", model.View())
+	}
+}
+
+func TestFindTraceMatchesIsCaseInsensitiveAndStripsANSI(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	matches := findTraceMatches(
+		"\x1b[31mDROP\x1b[0m\nno drop here",
+		"drop",
+	)
+	if len(matches) != 2 ||
+		matches[0].line != 0 ||
+		matches[0].column != 0 ||
+		matches[1].line != 1 {
+		t.Fatalf("matches = %#v", matches)
+	}
+}
+
 func TestPlanModeShowsThatNoPacketWasInjected(t *testing.T) {
 	t.Parallel()
 
