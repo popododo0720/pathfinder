@@ -95,6 +95,18 @@ func TestAnalysisFlagsRejectPlanAndObserveTogether(t *testing.T) {
 	}
 }
 
+func TestAnalysisFlagsRejectConflictingSSHHostKeyPolicies(t *testing.T) {
+	t.Parallel()
+
+	flags := &analysisFlags{
+		sshStrictHostKey:   true,
+		sshInsecureHostKey: true,
+	}
+	if err := flags.validate(); err == nil {
+		t.Fatal("conflicting SSH host-key policies were accepted")
+	}
+}
+
 func TestAnalysisFlagsRejectLiveModeWithoutOVS(t *testing.T) {
 	t.Parallel()
 

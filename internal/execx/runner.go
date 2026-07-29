@@ -27,14 +27,15 @@ type Runner interface {
 }
 
 type SSHConfig struct {
-	User           string
-	Port           int
-	IdentityFile   string
-	Password       string
-	StrictHostKey  bool
-	DisableControl bool
-	ControlPath    string
-	ConnectTimeout int
+	User            string
+	Port            int
+	IdentityFile    string
+	Password        string
+	StrictHostKey   bool
+	InsecureHostKey bool
+	DisableControl  bool
+	ControlPath     string
+	ConnectTimeout  int
 }
 
 type SystemRunner struct {
@@ -157,6 +158,8 @@ func (runner SystemRunner) sshArgs(
 			mode := "accept-new"
 			if runner.SSH.StrictHostKey {
 				mode = "strict"
+			} else if runner.SSH.InsecureHostKey {
+				mode = "insecure"
 			}
 			controlPath = "/tmp/pathfinder-ssh-%C-" + mode
 		}
@@ -168,7 +171,15 @@ func (runner SystemRunner) sshArgs(
 			"-o", "StreamLocalBindUnlink=yes",
 		)
 	}
-	if runner.SSH.StrictHostKey {
+	if runner.SSH.InsecureHostKey {
+		sshArgs = append(
+			sshArgs,
+			"-o",
+			"StrictHostKeyChecking=no",
+			"-o",
+			"UserKnownHostsFile=/dev/null",
+		)
+	} else if runner.SSH.StrictHostKey {
 		sshArgs = append(
 			sshArgs,
 			"-o",

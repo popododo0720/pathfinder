@@ -14,25 +14,26 @@ import (
 )
 
 type analysisFlags struct {
-	connectionStates  []string
-	minimal           bool
-	planOnly          bool
-	observe           bool
-	output            string
-	probeTimeout      time.Duration
-	observeTimeout    time.Duration
-	timeout           time.Duration
-	ovnHost           string
-	sshUser           string
-	sshPort           int
-	sshKey            string
-	sshStrictHostKey  bool
-	containerEngine   string
-	ovnContainer      string
-	enableOVS         bool
-	hostMappings      []string
-	ovsContainer      string
-	integrationBridge string
+	connectionStates   []string
+	minimal            bool
+	planOnly           bool
+	observe            bool
+	output             string
+	probeTimeout       time.Duration
+	observeTimeout     time.Duration
+	timeout            time.Duration
+	ovnHost            string
+	sshUser            string
+	sshPort            int
+	sshKey             string
+	sshStrictHostKey   bool
+	sshInsecureHostKey bool
+	containerEngine    string
+	ovnContainer       string
+	enableOVS          bool
+	hostMappings       []string
+	ovsContainer       string
+	integrationBridge  string
 }
 
 func (flags *analysisFlags) addTo(command *cobra.Command) {
@@ -136,6 +137,12 @@ func (flags *analysisFlags) addDoctorInfrastructureTo(
 		false,
 		"require a pre-existing known_hosts key (default: accept new once)",
 	)
+	command.Flags().BoolVar(
+		&flags.sshInsecureHostKey,
+		"ssh-insecure-host-key",
+		false,
+		"disable SSH host-key verification without changing known_hosts",
+	)
 	command.Flags().StringVar(
 		&flags.containerEngine,
 		"container-engine",
@@ -196,11 +203,12 @@ func (flags *analysisFlags) options(
 		OVSContainer:      flags.ovsContainer,
 		IntegrationBridge: flags.integrationBridge,
 		SSH: execx.SSHConfig{
-			User:          flags.sshUser,
-			Port:          flags.sshPort,
-			IdentityFile:  flags.sshKey,
-			Password:      os.Getenv("PF_SSH_PASSWORD"),
-			StrictHostKey: flags.sshStrictHostKey,
+			User:            flags.sshUser,
+			Port:            flags.sshPort,
+			IdentityFile:    flags.sshKey,
+			Password:        os.Getenv("PF_SSH_PASSWORD"),
+			StrictHostKey:   flags.sshStrictHostKey,
+			InsecureHostKey: flags.sshInsecureHostKey,
 		},
 	}, nil
 }
@@ -208,6 +216,9 @@ func (flags *analysisFlags) options(
 func (flags *analysisFlags) validate() error {
 	if flags.planOnly && flags.observe {
 		return fmt.Errorf("--plan and --observe cannot be used together")
+	}
+	if err := flags.validateSSHHostKeyPolicy(); err != nil {
+		return err
 	}
 	if flags.observe && !flags.enableOVS {
 		return fmt.Errorf("--observe requires --ovs")
@@ -224,6 +235,16 @@ func (flags *analysisFlags) validate() error {
 		)
 	}
 	return validateConnectionStates(flags.connectionStates)
+}
+
+func (flags *analysisFlags) validateSSHHostKeyPolicy() error {
+	if flags.sshStrictHostKey && flags.sshInsecureHostKey {
+		return fmt.Errorf(
+			"--ssh-strict-host-key and --ssh-insecure-host-key " +
+				"cannot be used together",
+		)
+	}
+	return nil
 }
 
 func (flags *analysisFlags) context(

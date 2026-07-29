@@ -30,7 +30,7 @@ func newDoctorCommand() *cobra.Command {
 					output,
 				)
 			}
-			return nil
+			return flags.validateSSHHostKeyPolicy()
 		},
 		RunE: func(command *cobra.Command, _ []string) error {
 			return runDoctor(command, flags, output)
@@ -80,11 +80,12 @@ func runDoctor(
 		OVNContainer:    flags.ovnContainer,
 		OVSContainer:    flags.ovsContainer,
 		Runner: execx.SystemRunner{SSH: execx.SSHConfig{
-			User:          flags.sshUser,
-			Port:          flags.sshPort,
-			IdentityFile:  flags.sshKey,
-			Password:      environmentOrDefault("PF_SSH_PASSWORD", ""),
-			StrictHostKey: flags.sshStrictHostKey,
+			User:            flags.sshUser,
+			Port:            flags.sshPort,
+			IdentityFile:    flags.sshKey,
+			Password:        environmentOrDefault("PF_SSH_PASSWORD", ""),
+			StrictHostKey:   flags.sshStrictHostKey,
+			InsecureHostKey: flags.sshInsecureHostKey,
 		}},
 		CheckOpenStack: func(ctx context.Context) error {
 			client, err := getNetworkClient(ctx)

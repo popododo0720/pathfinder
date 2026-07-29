@@ -80,6 +80,22 @@ func TestSSHArgsStrictModeUsesSeparateControlSocket(t *testing.T) {
 	}
 }
 
+func TestSSHArgsInsecureModeDoesNotModifyKnownHosts(t *testing.T) {
+	t.Parallel()
+
+	runner := SystemRunner{SSH: SSHConfig{InsecureHostKey: true}}
+	args := runner.sshArgs("stack1", "hostname", nil)
+	for _, expected := range []string{
+		"ControlPath=/tmp/pathfinder-ssh-%C-insecure",
+		"StrictHostKeyChecking=no",
+		"UserKnownHostsFile=/dev/null",
+	} {
+		if !slices.Contains(args, expected) {
+			t.Errorf("insecure ssh args do not contain %q: %v", expected, args)
+		}
+	}
+}
+
 func TestSSHArgsCanDisableConnectionReuse(t *testing.T) {
 	t.Parallel()
 

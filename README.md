@@ -69,6 +69,11 @@ read -rs PF_SSH_PASSWORD
 export PF_SSH_PASSWORD
 ```
 
+Frequently rebuilt lab hosts may legitimately have stale keys. After
+checking the new fingerprints out of band, `--ssh-insecure-host-key` can be
+used for one run; it disables verification with
+`UserKnownHostsFile=/dev/null` and does not rewrite `known_hosts`.
+
 Relevant optional variables:
 
 | Variable | Default | Purpose |
