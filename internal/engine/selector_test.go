@@ -5,10 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"pathfinder/internal/topology"
 )
 
 type fakeEndpointResolver struct {
-	values map[string]string
+	values map[string]topology.EndpointSelection
 	errFor map[string]error
 	calls  []string
 }
@@ -16,10 +18,10 @@ type fakeEndpointResolver struct {
 func (resolver *fakeEndpointResolver) Resolve(
 	_ context.Context,
 	selector string,
-) (string, error) {
+) (topology.EndpointSelection, error) {
 	resolver.calls = append(resolver.calls, selector)
 	if err := resolver.errFor[selector]; err != nil {
-		return "", err
+		return topology.EndpointSelection{}, err
 	}
 	return resolver.values[selector], nil
 }
@@ -28,9 +30,12 @@ func TestResolveEndpointSelectorsResolvesBeforeDiscovery(t *testing.T) {
 	t.Parallel()
 
 	resolver := &fakeEndpointResolver{
-		values: map[string]string{
-			"vm:web":       "source-port-id",
-			"ip:192.0.2.2": "destination-port-id",
+		values: map[string]topology.EndpointSelection{
+			"vm:web": {PortID: "source-port-id"},
+			"ip:192.0.2.2": {
+				PortID:    "destination-port-id",
+				IPAddress: "192.0.2.2",
+			},
 		},
 	}
 	source, destination, err := resolveEndpointSelectors(
@@ -42,9 +47,11 @@ func TestResolveEndpointSelectorsResolvesBeforeDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source != "source-port-id" ||
-		destination != "destination-port-id" {
-		t.Fatalf("resolved = %q -> %q", source, destination)
+	if source.PortID != "source-port-id" ||
+		source.IPAddress != "" ||
+		destination.PortID != "destination-port-id" ||
+		destination.IPAddress != "192.0.2.2" {
+		t.Fatalf("resolved = %+v -> %+v", source, destination)
 	}
 	if len(resolver.calls) != 2 ||
 		resolver.calls[0] != "vm:web" ||
@@ -58,7 +65,9 @@ func TestResolveEndpointSelectorsIdentifiesFailedRole(t *testing.T) {
 
 	failure := errors.New("ambiguous")
 	resolver := &fakeEndpointResolver{
-		values: map[string]string{"source": "source-port-id"},
+		values: map[string]topology.EndpointSelection{
+			"source": {PortID: "source-port-id"},
+		},
 		errFor: map[string]error{"destination": failure},
 	}
 	_, _, err := resolveEndpointSelectors(

@@ -3,6 +3,7 @@ package cloud
 import (
 	"context"
 	"fmt"
+	"net/netip"
 
 	"pathfinder/internal/topology"
 
@@ -12,13 +13,24 @@ import (
 func DiscoverEndpoint(
 	ctx context.Context,
 	client *gophercloud.ServiceClient,
-	portID string,
+	selection topology.EndpointSelection,
 ) (topology.EndpointContext, error) {
-	endpoint, err := GetEndpoint(ctx, client, portID)
+	endpoint, err := GetEndpoint(ctx, client, selection.PortID)
 	if err != nil {
 		return topology.EndpointContext{}, fmt.Errorf(
 			"get port %q: %w",
-			portID,
+			selection.PortID,
+			err,
+		)
+	}
+	selectedFixedIP, err := applyFixedIPSelection(
+		&endpoint,
+		selection.IPAddress,
+	)
+	if err != nil {
+		return topology.EndpointContext{}, fmt.Errorf(
+			"select fixed IP for port %q: %w",
+			selection.PortID,
 			err,
 		)
 	}
@@ -60,6 +72,9 @@ func DiscoverEndpoint(
 		if !containsString(subnetIDs, subnetID) {
 			subnets = append(subnets, subnet)
 		}
+	}
+	if selectedFixedIP != nil {
+		preferSubnet(subnets, selectedFixedIP.SubnetID)
 	}
 
 	securityGroups := make(
@@ -121,22 +136,23 @@ func DiscoverEndpoint(
 	}
 
 	return topology.EndpointContext{
-		Endpoint:       endpoint,
-		Network:        network,
-		Subnets:        subnets,
-		SecurityGroups: securityGroups,
-		QoSPolicy:      qosPolicy,
-		FloatingIPs:    floatingIPs,
+		Endpoint:        endpoint,
+		Network:         network,
+		Subnets:         subnets,
+		SecurityGroups:  securityGroups,
+		QoSPolicy:       qosPolicy,
+		FloatingIPs:     floatingIPs,
+		SelectedFixedIP: selectedFixedIP,
 	}, nil
 }
 
 func DiscoverNeutronPath(
 	ctx context.Context,
 	client *gophercloud.ServiceClient,
-	sourcePortID string,
-	destinationPortID string,
+	sourceSelection topology.EndpointSelection,
+	destinationSelection topology.EndpointSelection,
 ) (topology.NeutronPath, error) {
-	source, err := DiscoverEndpoint(ctx, client, sourcePortID)
+	source, err := DiscoverEndpoint(ctx, client, sourceSelection)
 	if err != nil {
 		return topology.NeutronPath{}, fmt.Errorf("source: %w", err)
 	}
@@ -144,7 +160,7 @@ func DiscoverNeutronPath(
 	destination, err := DiscoverEndpoint(
 		ctx,
 		client,
-		destinationPortID,
+		destinationSelection,
 	)
 	if err != nil {
 		return topology.NeutronPath{}, fmt.Errorf(
@@ -154,10 +170,10 @@ func DiscoverNeutronPath(
 	}
 
 	var subnetIDs []string
-	for _, subnet := range source.Subnets {
+	for _, subnet := range source.FlowSubnets() {
 		subnetIDs = append(subnetIDs, subnet.ID)
 	}
-	for _, subnet := range destination.Subnets {
+	for _, subnet := range destination.FlowSubnets() {
 		subnetIDs = append(subnetIDs, subnet.ID)
 	}
 
@@ -174,6 +190,60 @@ func DiscoverNeutronPath(
 		Destination: destination,
 		Routers:     routers,
 	}, nil
+}
+
+func applyFixedIPSelection(
+	endpoint *topology.Endpoint,
+	selectedAddress string,
+) (*topology.FixedIP, error) {
+	if selectedAddress == "" {
+		return nil, nil
+	}
+
+	selected, err := netip.ParseAddr(selectedAddress)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"invalid selected address %q: %w",
+			selectedAddress,
+			err,
+		)
+	}
+	for index, fixedIP := range endpoint.FixedIPs {
+		candidate, err := netip.ParseAddr(fixedIP.Address)
+		if err != nil || candidate != selected {
+			continue
+		}
+
+		if index > 0 {
+			copy(
+				endpoint.FixedIPs[1:index+1],
+				endpoint.FixedIPs[:index],
+			)
+			endpoint.FixedIPs[0] = fixedIP
+		}
+		value := endpoint.FixedIPs[0]
+		return &value, nil
+	}
+	return nil, fmt.Errorf(
+		"selected address %s is no longer assigned to the port",
+		selected,
+	)
+}
+
+func preferSubnet(subnets []topology.Subnet, selectedID string) {
+	if selectedID == "" {
+		return
+	}
+	for index, subnet := range subnets {
+		if subnet.ID != selectedID {
+			continue
+		}
+		if index > 0 {
+			copy(subnets[1:index+1], subnets[:index])
+			subnets[0] = subnet
+		}
+		return
+	}
 }
 
 func containsString(values []string, expected string) bool {

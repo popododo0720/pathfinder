@@ -119,3 +119,38 @@ func TestCapturesWithoutIPv4IDDoNotCorrelate(t *testing.T) {
 		t.Fatal("captures without a correlation key were accepted")
 	}
 }
+
+func TestObservationSpecUsesSelectedMultiIPv4Addresses(t *testing.T) {
+	t.Parallel()
+
+	path := validProbePath()
+	sourceSelected := topology.FixedIP{Address: "192.0.2.11"}
+	destinationSelected := topology.FixedIP{Address: "192.0.2.21"}
+	path.Source.Endpoint.FixedIPs = append(
+		path.Source.Endpoint.FixedIPs,
+		sourceSelected,
+	)
+	path.Source.SelectedFixedIP = &sourceSelected
+	path.Destination.Endpoint.FixedIPs = append(
+		path.Destination.Endpoint.FixedIPs,
+		destinationSelected,
+	)
+	path.Destination.SelectedFixedIP = &destinationSelected
+
+	spec, err := buildObservationSpec(path, "icmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.sourceIP != "192.0.2.11" ||
+		spec.destinationIP != "192.0.2.21" {
+		t.Fatalf(
+			"observation addresses = %s -> %s, want selected addresses",
+			spec.sourceIP,
+			spec.destinationIP,
+		)
+	}
+	if !strings.Contains(spec.requestFilter, "src host 192.0.2.11") ||
+		!strings.Contains(spec.requestFilter, "dst host 192.0.2.21") {
+		t.Fatalf("request filter = %q", spec.requestFilter)
+	}
+}

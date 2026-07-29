@@ -99,6 +99,42 @@ func TestBuildMicroflowRejectsDifferentIPFamilies(t *testing.T) {
 	}
 }
 
+func TestBuildMicroflowUsesSelectedMultiIPv4Addresses(t *testing.T) {
+	t.Parallel()
+
+	source := multiAddressEndpointContext(
+		"source-port",
+		"fa:16:3e:00:00:01",
+		"network",
+		"10.0.0.10",
+		"192.0.2.10",
+	)
+	destination := multiAddressEndpointContext(
+		"destination-port",
+		"fa:16:3e:00:00:02",
+		"network",
+		"10.0.0.20",
+		"192.0.2.20",
+	)
+
+	flow, err := BuildMicroflow(source, destination, "icmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, condition := range []string{
+		"ip4.src == 192.0.2.10",
+		"ip4.dst == 192.0.2.20",
+	} {
+		if !strings.Contains(flow, condition) {
+			t.Fatalf("flow %q does not contain %q", flow, condition)
+		}
+	}
+	if strings.Contains(flow, "ip4.src == 10.0.0.10") ||
+		strings.Contains(flow, "ip4.dst == 10.0.0.20") {
+		t.Fatalf("flow used an unselected fixed IP: %q", flow)
+	}
+}
+
 func endpointContext(
 	portID string,
 	macAddress string,
@@ -114,5 +150,30 @@ func endpointContext(
 				{Address: ipAddress},
 			},
 		},
+	}
+}
+
+func multiAddressEndpointContext(
+	portID string,
+	macAddress string,
+	networkID string,
+	firstAddress string,
+	selectedAddress string,
+) topology.EndpointContext {
+	selected := topology.FixedIP{
+		Address:  selectedAddress,
+		SubnetID: "selected-subnet",
+	}
+	return topology.EndpointContext{
+		Endpoint: topology.Endpoint{
+			PortID:     portID,
+			MACAddress: macAddress,
+			NetworkID:  networkID,
+			FixedIPs: []topology.FixedIP{
+				{Address: firstAddress, SubnetID: "first-subnet"},
+				selected,
+			},
+		},
+		SelectedFixedIP: &selected,
 	}
 }

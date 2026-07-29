@@ -180,6 +180,46 @@ func TestBuildARPRequest(t *testing.T) {
 	}
 }
 
+func TestSourceGatewayUsesSelectedMultiIPv4Subnet(t *testing.T) {
+	t.Parallel()
+
+	source := topology.EndpointContext{
+		Endpoint: topology.Endpoint{
+			FixedIPs: []topology.FixedIP{
+				{Address: "10.0.0.10", SubnetID: "first-subnet"},
+				{Address: "192.0.2.10", SubnetID: "selected-subnet"},
+			},
+		},
+		Subnets: []topology.Subnet{
+			{
+				ID:        "first-subnet",
+				GatewayIP: "10.0.0.1",
+			},
+			{
+				ID:        "selected-subnet",
+				GatewayIP: "192.0.2.1",
+			},
+		},
+	}
+	selected := source.Endpoint.FixedIPs[1]
+	source.SelectedFixedIP = &selected
+
+	subnetID, sourceIP, gatewayIP, err := sourceGateway(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subnetID != "selected-subnet" ||
+		sourceIP.String() != "192.0.2.10" ||
+		gatewayIP.String() != "192.0.2.1" {
+		t.Fatalf(
+			"gateway selection = %s %s -> %s",
+			subnetID,
+			sourceIP,
+			gatewayIP,
+		)
+	}
+}
+
 func routedProbePath() topology.NeutronPath {
 	path := validProbePath()
 	path.Source.Endpoint.NetworkID = "source-network"

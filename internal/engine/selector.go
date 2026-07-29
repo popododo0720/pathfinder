@@ -3,10 +3,15 @@ package engine
 import (
 	"context"
 	"fmt"
+
+	"pathfinder/internal/topology"
 )
 
 type endpointSelectorResolver interface {
-	Resolve(context.Context, string) (string, error)
+	Resolve(
+		context.Context,
+		string,
+	) (topology.EndpointSelection, error)
 }
 
 func resolveEndpointSelectors(
@@ -14,22 +19,26 @@ func resolveEndpointSelectors(
 	resolver endpointSelectorResolver,
 	source string,
 	destination string,
-) (string, string, error) {
-	sourcePortID, err := resolver.Resolve(ctx, source)
+) (topology.EndpointSelection, topology.EndpointSelection, error) {
+	sourceSelection, err := resolver.Resolve(ctx, source)
 	if err != nil {
-		return "", "", fmt.Errorf(
-			"resolve source endpoint %q: %w",
-			source,
-			err,
-		)
+		return topology.EndpointSelection{},
+			topology.EndpointSelection{},
+			fmt.Errorf(
+				"resolve source endpoint %q: %w",
+				source,
+				err,
+			)
 	}
-	destinationPortID, err := resolver.Resolve(ctx, destination)
+	destinationSelection, err := resolver.Resolve(ctx, destination)
 	if err != nil {
-		return "", "", fmt.Errorf(
-			"resolve destination endpoint %q: %w",
-			destination,
-			err,
-		)
+		return topology.EndpointSelection{},
+			topology.EndpointSelection{},
+			fmt.Errorf(
+				"resolve destination endpoint %q: %w",
+				destination,
+				err,
+			)
 	}
-	return sourcePortID, destinationPortID, nil
+	return sourceSelection, destinationSelection, nil
 }

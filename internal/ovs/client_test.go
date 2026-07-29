@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,42 @@ func TestGetEndpointPropagatesContainerCommandFailure(t *testing.T) {
 	var commandError *execx.CommandError
 	if !errors.As(err, &commandError) {
 		t.Fatalf("GetEndpoint() error does not contain CommandError: %v", err)
+	}
+}
+
+func TestTracePlacesConnectionStatesBeforeBridgeAndFlow(t *testing.T) {
+	t.Parallel()
+
+	runner := &captureRunner{}
+	client := NewClient(runner, Config{
+		Host:      "stack2",
+		Container: "openvswitch_vswitchd",
+		Bridge:    "br-int",
+	})
+	flow := "in_port=7,icmp,nw_src=192.0.2.10,nw_dst=192.0.2.20"
+	_, err := client.Trace(
+		context.Background(),
+		flow,
+		[]string{"trk,new", "trk,est,rpl"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		"exec",
+		"openvswitch_vswitchd",
+		"ovs-appctl",
+		"ofproto/trace",
+		"--ct-next",
+		"trk,new",
+		"--ct-next",
+		"trk,est,rpl",
+		"br-int",
+		flow,
+	}
+	if !slices.Equal(runner.args, want) {
+		t.Fatalf("Trace args = %q, want %q", runner.args, want)
 	}
 }
 

@@ -112,6 +112,42 @@ func TestBuildTraceFlowDefaultsPlainICMPToIPv4ICMP(t *testing.T) {
 	}
 }
 
+func TestBuildTraceFlowUsesSelectedMultiIPv4Addresses(t *testing.T) {
+	t.Parallel()
+
+	source := multiAddressTestEndpoint(
+		"source",
+		"fa:16:3e:00:00:01",
+		"network",
+		"10.0.0.10",
+		"192.0.2.10",
+	)
+	destination := multiAddressTestEndpoint(
+		"destination",
+		"fa:16:3e:00:00:02",
+		"network",
+		"10.0.0.20",
+		"192.0.2.20",
+	)
+
+	flow, err := BuildTraceFlow(source, destination, 7, "icmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{
+		"nw_src=192.0.2.10",
+		"nw_dst=192.0.2.20",
+	} {
+		if !strings.Contains(flow, field) {
+			t.Fatalf("flow %q does not contain %q", flow, field)
+		}
+	}
+	if strings.Contains(flow, "nw_src=10.0.0.10") ||
+		strings.Contains(flow, "nw_dst=10.0.0.20") {
+		t.Fatalf("flow used an unselected fixed IP: %q", flow)
+	}
+}
+
 func testEndpoint(
 	portID string,
 	macAddress string,
@@ -127,5 +163,30 @@ func testEndpoint(
 				{Address: ipAddress},
 			},
 		},
+	}
+}
+
+func multiAddressTestEndpoint(
+	portID string,
+	macAddress string,
+	networkID string,
+	firstAddress string,
+	selectedAddress string,
+) topology.EndpointContext {
+	selected := topology.FixedIP{
+		Address:  selectedAddress,
+		SubnetID: "selected-subnet",
+	}
+	return topology.EndpointContext{
+		Endpoint: topology.Endpoint{
+			PortID:     portID,
+			MACAddress: macAddress,
+			NetworkID:  networkID,
+			FixedIPs: []topology.FixedIP{
+				{Address: firstAddress, SubnetID: "first-subnet"},
+				selected,
+			},
+		},
+		SelectedFixedIP: &selected,
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"pathfinder/internal/topology"
+
 	"github.com/gophercloud/gophercloud/v2"
 	"github.com/gophercloud/gophercloud/v2/openstack"
 	"github.com/gophercloud/gophercloud/v2/openstack/compute/v2/servers"
@@ -91,15 +93,15 @@ func newEndpointSelectorResolver(
 func (resolver *EndpointSelectorResolver) Resolve(
 	ctx context.Context,
 	selector string,
-) (string, error) {
+) (topology.EndpointSelection, error) {
 	selector = strings.TrimSpace(selector)
 	if isUUID(selector) {
-		return selector, nil
+		return topology.EndpointSelection{PortID: selector}, nil
 	}
 
 	kind, value, found := strings.Cut(selector, ":")
 	if !found || value == "" {
-		return "", invalidSelector(selector)
+		return topology.EndpointSelection{}, invalidSelector(selector)
 	}
 	switch kind {
 	case "ip":
@@ -111,7 +113,7 @@ func (resolver *EndpointSelectorResolver) Resolve(
 	case "vm":
 		return resolver.resolveVMName(ctx, selector, value)
 	default:
-		return "", invalidSelector(selector)
+		return topology.EndpointSelection{}, invalidSelector(selector)
 	}
 }
 
@@ -119,10 +121,10 @@ func (resolver *EndpointSelectorResolver) resolveIP(
 	ctx context.Context,
 	selector string,
 	value string,
-) (string, error) {
+) (topology.EndpointSelection, error) {
 	address, err := netip.ParseAddr(value)
 	if err != nil {
-		return "", fmt.Errorf(
+		return topology.EndpointSelection{}, fmt.Errorf(
 			"invalid IP endpoint selector %q: %w",
 			selector,
 			err,
@@ -133,44 +135,52 @@ func (resolver *EndpointSelectorResolver) resolveIP(
 		portSelectorFilter{IP: address.String()},
 	)
 	if err != nil {
-		return "", fmt.Errorf("resolve %q: list Neutron ports: %w", selector, err)
+		return topology.EndpointSelection{}, fmt.Errorf(
+			"resolve %q: list Neutron ports: %w",
+			selector,
+			err,
+		)
 	}
 	candidates = filterPorts(candidates, func(port selectorPort) bool {
 		return portHasIP(port, address.String())
 	})
-	return selectPort(selector, candidates, "")
+	return selectPort(selector, candidates, "", address.String())
 }
 
 func (resolver *EndpointSelectorResolver) resolvePortName(
 	ctx context.Context,
 	selector string,
 	name string,
-) (string, error) {
+) (topology.EndpointSelection, error) {
 	candidates, err := resolver.backend.ListPorts(
 		ctx,
 		portSelectorFilter{Name: name},
 	)
 	if err != nil {
-		return "", fmt.Errorf("resolve %q: list Neutron ports: %w", selector, err)
+		return topology.EndpointSelection{}, fmt.Errorf(
+			"resolve %q: list Neutron ports: %w",
+			selector,
+			err,
+		)
 	}
 	candidates = filterPorts(candidates, func(port selectorPort) bool {
 		return port.Name == name
 	})
-	return selectPort(selector, candidates, "")
+	return selectPort(selector, candidates, "", "")
 }
 
 func (resolver *EndpointSelectorResolver) resolveVMID(
 	ctx context.Context,
 	selector string,
 	value string,
-) (string, error) {
+) (topology.EndpointSelection, error) {
 	serverID, address, err := parseVMTarget(selector, value, true)
 	if err != nil {
-		return "", err
+		return topology.EndpointSelection{}, err
 	}
 	candidates, err := resolver.vmPorts(ctx, selector, serverID)
 	if err != nil {
-		return "", err
+		return topology.EndpointSelection{}, err
 	}
 	if address != "" {
 		candidates = filterPorts(candidates, func(port selectorPort) bool {
@@ -184,25 +194,29 @@ func (resolver *EndpointSelectorResolver) resolveVMID(
 			serverID,
 		)
 	}
-	return selectPort(selector, candidates, hint)
+	return selectPort(selector, candidates, hint, address)
 }
 
 func (resolver *EndpointSelectorResolver) resolveVMName(
 	ctx context.Context,
 	selector string,
 	value string,
-) (string, error) {
+) (topology.EndpointSelection, error) {
 	name, address, err := parseVMTarget(selector, value, false)
 	if err != nil {
-		return "", err
+		return topology.EndpointSelection{}, err
 	}
 	candidates, err := resolver.backend.ListServers(ctx, name)
 	if err != nil {
-		return "", fmt.Errorf("resolve %q: list Nova servers: %w", selector, err)
+		return topology.EndpointSelection{}, fmt.Errorf(
+			"resolve %q: list Nova servers: %w",
+			selector,
+			err,
+		)
 	}
 	candidates = filterServers(candidates, name)
 	if len(candidates) == 0 {
-		return "", fmt.Errorf(
+		return topology.EndpointSelection{}, fmt.Errorf(
 			"%w: %q matched no Nova server named %q",
 			ErrEndpointSelectorNotFound,
 			selector,
@@ -210,14 +224,15 @@ func (resolver *EndpointSelectorResolver) resolveVMName(
 		)
 	}
 	if len(candidates) > 1 && address == "" {
-		return "", ambiguousServers(selector, candidates)
+		return topology.EndpointSelection{},
+			ambiguousServers(selector, candidates)
 	}
 
 	var matchedPorts []selectorPort
 	for _, server := range candidates {
 		serverPorts, err := resolver.vmPorts(ctx, selector, server.ID)
 		if err != nil {
-			return "", err
+			return topology.EndpointSelection{}, err
 		}
 		if address != "" {
 			serverPorts = filterPorts(
@@ -236,7 +251,7 @@ func (resolver *EndpointSelectorResolver) resolveVMName(
 			name,
 		)
 	}
-	return selectPort(selector, matchedPorts, hint)
+	return selectPort(selector, matchedPorts, hint, address)
 }
 
 func (resolver *EndpointSelectorResolver) vmPorts(
@@ -294,17 +309,21 @@ func selectPort(
 	selector string,
 	candidates []selectorPort,
 	hint string,
-) (string, error) {
+	selectedIP string,
+) (topology.EndpointSelection, error) {
 	candidates = uniquePorts(candidates)
 	switch len(candidates) {
 	case 0:
-		return "", fmt.Errorf(
+		return topology.EndpointSelection{}, fmt.Errorf(
 			"%w: %q matched no Neutron port",
 			ErrEndpointSelectorNotFound,
 			selector,
 		)
 	case 1:
-		return candidates[0].ID, nil
+		return topology.EndpointSelection{
+			PortID:    candidates[0].ID,
+			IPAddress: selectedIP,
+		}, nil
 	default:
 		descriptions := make([]string, 0, len(candidates))
 		for _, candidate := range candidates {
@@ -317,7 +336,7 @@ func selectPort(
 		if hint == "" {
 			hint = "use a bare Neutron port UUID from the candidates"
 		}
-		return "", &AmbiguousEndpointSelectorError{
+		return topology.EndpointSelection{}, &AmbiguousEndpointSelectorError{
 			Selector:   selector,
 			Candidates: descriptions,
 			Hint:       hint,

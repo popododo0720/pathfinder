@@ -122,7 +122,7 @@ func ResolveNextHop(
 func sourceGateway(
 	source topology.EndpointContext,
 ) (string, netip.Addr, netip.Addr, error) {
-	for _, fixedIP := range source.Endpoint.FixedIPs {
+	for _, fixedIP := range source.FlowFixedIPs() {
 		address, err := netip.ParseAddr(fixedIP.Address)
 		if err != nil || !address.Is4() {
 			continue

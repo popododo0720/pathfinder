@@ -22,8 +22,8 @@ func BuildMicroflow(
 	extra string,
 ) (string, error) {
 	sourceIP, destinationIP, err := compatibleFixedIPs(
-		source.Endpoint.FixedIPs,
-		destination.Endpoint.FixedIPs,
+		source.FlowFixedIPs(),
+		destination.FlowFixedIPs(),
 	)
 	if err != nil {
 		return "", err

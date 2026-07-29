@@ -51,6 +51,7 @@ func DiscoverPath(
 	destinationClient *Client,
 	neutronPath topology.NeutronPath,
 	extraMicroflow string,
+	connectionStates []string,
 ) (topology.OVSPath, error) {
 	type endpointResult struct {
 		endpoint topology.OVSEndpoint
@@ -103,7 +104,7 @@ func DiscoverPath(
 		return topology.OVSPath{}, err
 	}
 
-	trace, err := sourceClient.Trace(ctx, flow)
+	trace, err := sourceClient.Trace(ctx, flow, connectionStates)
 	if err != nil {
 		return topology.OVSPath{}, err
 	}
@@ -196,14 +197,15 @@ printf 'interface=%s\nofport=%s\nlink_state=%s\nerror=%s\n' \
 func (client *Client) Trace(
 	ctx context.Context,
 	flow string,
+	connectionStates []string,
 ) (string, error) {
-	return client.run(
-		ctx,
-		"ovs-appctl",
-		"ofproto/trace",
-		client.config.Bridge,
-		flow,
-	)
+	args := make([]string, 0, len(connectionStates)*2+3)
+	args = append(args, "ofproto/trace")
+	for _, state := range connectionStates {
+		args = append(args, "--ct-next", state)
+	}
+	args = append(args, client.config.Bridge, flow)
+	return client.run(ctx, "ovs-appctl", args...)
 }
 
 func (client *Client) InjectPacket(

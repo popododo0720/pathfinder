@@ -47,8 +47,8 @@ func TestEndpointSelectorRetainsBarePortUUID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != testPortID {
-		t.Fatalf("resolved = %q, want %q", resolved, testPortID)
+	if resolved.PortID != testPortID || resolved.IPAddress != "" {
+		t.Fatalf("resolved = %+v, want port %q without IP", resolved, testPortID)
 	}
 	if len(backend.portCalls) != 0 || len(backend.serverCalls) != 0 {
 		t.Fatalf(
@@ -98,12 +98,24 @@ func TestEndpointSelectorResolvesUniqueNeutronPort(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if resolved != testPortID {
+			if resolved.PortID != testPortID {
 				t.Fatalf(
-					"Resolve(%q) = %q, want %q",
+					"Resolve(%q) = %+v, want port %q",
 					test.selector,
 					resolved,
 					testPortID,
+				)
+			}
+			expectedIP := ""
+			if test.selector == "ip:192.0.2.10" {
+				expectedIP = "192.0.2.10"
+			}
+			if resolved.IPAddress != expectedIP {
+				t.Fatalf(
+					"Resolve(%q) selected IP = %q, want %q",
+					test.selector,
+					resolved.IPAddress,
+					expectedIP,
 				)
 			}
 		})
@@ -198,9 +210,10 @@ func TestEndpointSelectorRequiresIPForMultiNICVM(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Resolve(%q): %v", selector, err)
 		}
-		if resolved != secondPortID {
+		if resolved.PortID != secondPortID ||
+			resolved.IPAddress != "198.51.100.10" {
 			t.Fatalf(
-				"Resolve(%q) = %q, want %q",
+				"Resolve(%q) = %+v, want port %q at selected IP",
 				selector,
 				resolved,
 				secondPortID,
@@ -250,8 +263,54 @@ func TestEndpointSelectorNeverChoosesArbitraryDuplicateVMName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved != secondPortID {
-		t.Fatalf("resolved = %q, want %q", resolved, secondPortID)
+	if resolved.PortID != secondPortID ||
+		resolved.IPAddress != "198.51.100.10" {
+		t.Fatalf(
+			"resolved = %+v, want port %q at selected IP",
+			resolved,
+			secondPortID,
+		)
+	}
+}
+
+func TestEndpointSelectorPreservesSelectedIPOnMultiAddressPort(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	backend := &fakeSelectorBackend{
+		ports: []selectorPort{{
+			ID:          testPortID,
+			DeviceID:    testServerID,
+			DeviceOwner: "compute:nova",
+			FixedIPs: []string{
+				"192.0.2.10",
+				"192.0.2.11",
+			},
+		}},
+		servers: []selectorServer{{
+			ID:   testServerID,
+			Name: "multi-address",
+		}},
+	}
+	resolver := newEndpointSelectorResolver(backend)
+	for _, selector := range []string{
+		"ip:192.0.2.11",
+		"vm-id:" + testServerID + "@192.0.2.11",
+		"vm:multi-address@192.0.2.11",
+	} {
+		resolved, err := resolver.Resolve(context.Background(), selector)
+		if err != nil {
+			t.Fatalf("Resolve(%q): %v", selector, err)
+		}
+		if resolved.PortID != testPortID ||
+			resolved.IPAddress != "192.0.2.11" {
+			t.Fatalf(
+				"Resolve(%q) = %+v, want selected second fixed IP",
+				selector,
+				resolved,
+			)
+		}
 	}
 }
 

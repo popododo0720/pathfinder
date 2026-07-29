@@ -5,6 +5,11 @@ type FixedIP struct {
 	SubnetID string
 }
 
+type EndpointSelection struct {
+	PortID    string
+	IPAddress string
+}
+
 type Endpoint struct {
 	PortID           string
 	ProjectID        string

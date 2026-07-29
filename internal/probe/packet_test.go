@@ -180,6 +180,47 @@ func TestBuildPacketUsesDirectMACWithinSourceSubnet(t *testing.T) {
 	}
 }
 
+func TestBuildPacketUsesSelectedMultiIPv4Addresses(t *testing.T) {
+	t.Parallel()
+
+	path := testPath("network", "network")
+	sourceSelected := topology.FixedIP{
+		Address:  "192.0.2.11",
+		SubnetID: "selected-subnet",
+	}
+	destinationSelected := topology.FixedIP{
+		Address:  "192.0.2.21",
+		SubnetID: "selected-subnet",
+	}
+	path.Source.Endpoint.FixedIPs = append(
+		path.Source.Endpoint.FixedIPs,
+		sourceSelected,
+	)
+	path.Source.SelectedFixedIP = &sourceSelected
+	path.Source.Subnets = []topology.Subnet{{
+		ID:   "selected-subnet",
+		CIDR: "192.0.2.0/24",
+	}}
+	path.Destination.Endpoint.FixedIPs = append(
+		path.Destination.Endpoint.FixedIPs,
+		destinationSelected,
+	)
+	path.Destination.SelectedFixedIP = &destinationSelected
+
+	packet, err := BuildPacket(path, "icmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if packet.SourceIP.String() != "192.0.2.11" ||
+		packet.DestinationIP.String() != "192.0.2.21" {
+		t.Fatalf(
+			"packet addresses = %s -> %s, want selected addresses",
+			packet.SourceIP,
+			packet.DestinationIP,
+		)
+	}
+}
+
 func testPath(
 	sourceNetwork string,
 	destinationNetwork string,

@@ -15,6 +15,8 @@ import (
 	"pathfinder/internal/topology"
 )
 
+const defaultConnectionState = "trk,est"
+
 type Options struct {
 	SourcePortID      string
 	DestinationPortID string
@@ -66,6 +68,9 @@ type Result struct {
 
 func Analyze(ctx context.Context, options Options) (Result, error) {
 	started := time.Now()
+	options.ConnectionStates = effectiveConnectionStates(
+		options.ConnectionStates,
+	)
 	result := Result{
 		OVNRequested:   options.OVNHost != "",
 		OVSRequested:   options.EnableOVS,
@@ -77,7 +82,7 @@ func Analyze(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("create Neutron client: %w", err)
 	}
-	sourcePortID, destinationPortID, err := resolveEndpointSelectors(
+	sourceSelection, destinationSelection, err := resolveEndpointSelectors(
 		ctx,
 		cloud.NewEndpointSelectorResolver(networkClient),
 		options.SourcePortID,
@@ -89,8 +94,8 @@ func Analyze(ctx context.Context, options Options) (Result, error) {
 	result.Neutron, err = cloud.DiscoverNeutronPath(
 		ctx,
 		networkClient,
-		sourcePortID,
-		destinationPortID,
+		sourceSelection,
+		destinationSelection,
 	)
 	result.Timings.Neutron = time.Since(neutronStarted)
 	if err != nil {
@@ -293,6 +298,7 @@ func analyzeOVS(
 		destinationClient,
 		path,
 		options.Microflow,
+		options.ConnectionStates,
 	)
 	observationResult.duration = time.Since(started)
 	if err != nil {
@@ -301,6 +307,13 @@ func analyzeOVS(
 	}
 	observationResult.value = &pathResult
 	return observationResult
+}
+
+func effectiveConnectionStates(states []string) []string {
+	if len(states) == 0 {
+		return []string{defaultConnectionState}
+	}
+	return append([]string(nil), states...)
 }
 
 func ovsClients(

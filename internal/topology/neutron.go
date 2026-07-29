@@ -89,12 +89,35 @@ type FloatingIP struct {
 }
 
 type EndpointContext struct {
-	Endpoint       Endpoint
-	Network        Network
-	Subnets        []Subnet
-	SecurityGroups []SecurityGroup
-	QoSPolicy      *QoSPolicy
-	FloatingIPs    []FloatingIP
+	Endpoint        Endpoint
+	Network         Network
+	Subnets         []Subnet
+	SecurityGroups  []SecurityGroup
+	QoSPolicy       *QoSPolicy
+	FloatingIPs     []FloatingIP
+	SelectedFixedIP *FixedIP
+}
+
+func (context EndpointContext) FlowFixedIPs() []FixedIP {
+	if context.SelectedFixedIP != nil {
+		return []FixedIP{*context.SelectedFixedIP}
+	}
+	return context.Endpoint.FixedIPs
+}
+
+func (context EndpointContext) FlowSubnets() []Subnet {
+	if context.SelectedFixedIP == nil ||
+		context.SelectedFixedIP.SubnetID == "" {
+		return context.Subnets
+	}
+
+	selected := make([]Subnet, 0, 1)
+	for _, subnet := range context.Subnets {
+		if subnet.ID == context.SelectedFixedIP.SubnetID {
+			selected = append(selected, subnet)
+		}
+	}
+	return selected
 }
 
 type NeutronPath struct {

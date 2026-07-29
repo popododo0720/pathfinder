@@ -502,8 +502,8 @@ func observedOVNEndpoint(
 
 func routeStatus(path topology.NeutronPath) (Status, string, string) {
 	sourceIP, destinationIP := compatibleAddresses(
-		path.Source.Endpoint.FixedIPs,
-		path.Destination.Endpoint.FixedIPs,
+		path.Source.FlowFixedIPs(),
+		path.Destination.FlowFixedIPs(),
 	)
 	if path.Source.Endpoint.SameNetwork(path.Destination.Endpoint) &&
 		sourceIP.IsValid() &&
@@ -519,8 +519,8 @@ func routeStatus(path topology.NeutronPath) (Status, string, string) {
 			path.Source.Network.Name
 	}
 
-	sourceSubnets := subnetSet(path.Source.Subnets)
-	destinationSubnets := subnetSet(path.Destination.Subnets)
+	sourceSubnets := subnetSet(path.Source.FlowSubnets())
+	destinationSubnets := subnetSet(path.Destination.FlowSubnets())
 	for _, router := range path.Routers {
 		sourceAttached := intersects(
 			sourceSubnets,
@@ -617,28 +617,31 @@ func intersects(values map[string]struct{}, candidates []string) bool {
 func (builder *reportBuilder) addTraceFindings(input Input) {
 	if input.OVN != nil {
 		if !ovnTraceHasOutput(input.OVN.Trace) {
-			builder.addFinding(Finding{
-				Layer:   "ovn-trace",
-				Status:  StatusFail,
-				Message: "ovn-trace produced no output action",
-			})
+			builder.addPlanTraceFinding(
+				input,
+				"ovn-trace",
+				StatusFail,
+				"ovn-trace produced no output action",
+			)
 		}
 	}
 	if input.OVS != nil {
 		actions := lastDatapathActions(input.OVS.Trace)
 		switch {
 		case actions == "":
-			builder.addFinding(Finding{
-				Layer:   "ovs-trace",
-				Status:  StatusUnknown,
-				Message: "ofproto/trace has no Datapath actions line",
-			})
+			builder.addPlanTraceFinding(
+				input,
+				"ovs-trace",
+				StatusUnknown,
+				"ofproto/trace has no Datapath actions line",
+			)
 		case strings.Contains(strings.ToLower(actions), "drop"):
-			builder.addFinding(Finding{
-				Layer:   "ovs-trace",
-				Status:  StatusFail,
-				Message: "final OVS datapath action is drop",
-			})
+			builder.addPlanTraceFinding(
+				input,
+				"ovs-trace",
+				StatusFail,
+				"final OVS datapath action is drop",
+			)
 		}
 		if !input.Neutron.Source.Endpoint.SameNetwork(
 			input.Neutron.Destination.Endpoint,
@@ -654,10 +657,43 @@ func (builder *reportBuilder) addTraceFindings(input Input) {
 	}
 }
 
+func (builder *reportBuilder) addPlanTraceFinding(
+	input Input,
+	layer string,
+	status Status,
+	message string,
+) {
+	if probeDelivered(input) {
+		mode := "live"
+		if input.Probe.Mode == "observe" {
+			mode = "observed"
+		}
+		status = StatusWarning
+		message += fmt.Sprintf(
+			"; exact %s endpoint-tap delivery succeeded, so live evidence "+
+				"wins; the plan trace can diverge when runtime conntrack, "+
+				"next-hop, NAT, or packet metadata is absent",
+			mode,
+		)
+	}
+	builder.addFinding(Finding{
+		Layer:   layer,
+		Status:  status,
+		Message: message,
+	})
+}
+
 func probeDelivered(input Input) bool {
-	return input.ProbeError == nil &&
-		input.Probe != nil &&
-		input.Probe.Delivered
+	if input.ProbeError != nil ||
+		input.Probe == nil ||
+		!input.Probe.Delivered {
+		return false
+	}
+	if input.Probe.Mode == "observe" {
+		return input.Probe.SourceObservationAttempted &&
+			input.Probe.SourceObserved
+	}
+	return input.Probe.Injected
 }
 
 func ovnTraceHasOutput(trace string) bool {

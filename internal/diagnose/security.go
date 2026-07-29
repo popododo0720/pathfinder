@@ -42,8 +42,8 @@ func parsePacketSpec(
 	}
 
 	sourceIP, destinationIP := compatibleAddresses(
-		source.Endpoint.FixedIPs,
-		destination.Endpoint.FixedIPs,
+		source.FlowFixedIPs(),
+		destination.FlowFixedIPs(),
 	)
 	if sourceIP.IsValid() && destinationIP.IsValid() {
 		if sourceIP.Is4() {
@@ -78,7 +78,7 @@ func evaluateSecurity(
 		return StatusUnknown, "no security groups returned"
 	}
 
-	remoteIP := firstAddress(remote.Endpoint.FixedIPs, spec.ipVersion)
+	remoteIP := firstAddress(remote.FlowFixedIPs(), spec.ipVersion)
 	remoteGroups := make(map[string]struct{})
 	for _, groupID := range remote.Endpoint.SecurityGroupIDs {
 		remoteGroups[groupID] = struct{}{}

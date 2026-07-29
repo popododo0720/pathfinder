@@ -74,6 +74,107 @@ func TestBuildSameNetworkDifferentSubnetsUsesRouter(t *testing.T) {
 	}
 }
 
+func TestRouteStatusUsesSelectedMultiIPv4Subnets(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("source-network", "destination-network")
+	sourceSelected := topology.FixedIP{
+		Address:  "192.0.2.10",
+		SubnetID: "selected-source-subnet",
+	}
+	destinationSelected := topology.FixedIP{
+		Address:  "198.51.100.20",
+		SubnetID: "selected-destination-subnet",
+	}
+	path.Source.Endpoint.FixedIPs = append(
+		path.Source.Endpoint.FixedIPs,
+		sourceSelected,
+	)
+	path.Source.Subnets = append(
+		path.Source.Subnets,
+		topology.Subnet{ID: sourceSelected.SubnetID},
+	)
+	path.Source.SelectedFixedIP = &sourceSelected
+	path.Destination.Endpoint.FixedIPs = append(
+		path.Destination.Endpoint.FixedIPs,
+		destinationSelected,
+	)
+	path.Destination.Subnets = append(
+		path.Destination.Subnets,
+		topology.Subnet{ID: destinationSelected.SubnetID},
+	)
+	path.Destination.SelectedFixedIP = &destinationSelected
+	path.Routers = []topology.Router{
+		{
+			Name:         "unselected-router",
+			Status:       "ACTIVE",
+			AdminStateUp: true,
+			InterfaceSubnets: []string{
+				"source-network-subnet",
+				"destination-network-subnet",
+			},
+		},
+		{
+			Name:         "selected-router",
+			Status:       "ACTIVE",
+			AdminStateUp: true,
+			InterfaceSubnets: []string{
+				sourceSelected.SubnetID,
+				destinationSelected.SubnetID,
+			},
+		},
+	}
+
+	status, label, _ := routeStatus(path)
+	if status != StatusPass || label != "Neutron router selected-router" {
+		t.Fatalf("route = %s %q, want selected-router", status, label)
+	}
+}
+
+func TestSecurityEvaluationUsesSelectedMultiIPv4Address(t *testing.T) {
+	t.Parallel()
+
+	source := testNeutronPath("network", "network").Source
+	destination := testNeutronPath("network", "network").Destination
+	sourceSelected := topology.FixedIP{
+		Address:  "192.0.2.10",
+		SubnetID: "selected-subnet",
+	}
+	destinationSelected := topology.FixedIP{
+		Address:  "192.0.2.20",
+		SubnetID: "selected-subnet",
+	}
+	source.Endpoint.FixedIPs = append(
+		source.Endpoint.FixedIPs,
+		sourceSelected,
+	)
+	source.SelectedFixedIP = &sourceSelected
+	destination.Endpoint.FixedIPs = append(
+		destination.Endpoint.FixedIPs,
+		destinationSelected,
+	)
+	destination.SelectedFixedIP = &destinationSelected
+	source.SecurityGroups = []topology.SecurityGroup{{
+		Name: "selected-only",
+		Rules: []topology.SecurityRule{{
+			Direction:      "egress",
+			EtherType:      "IPv4",
+			RemoteIPPrefix: "192.0.2.20/32",
+		}},
+	}}
+
+	spec := parsePacketSpec("icmp", source, destination)
+	status, _ := evaluateSecurity(
+		source,
+		destination,
+		"egress",
+		spec,
+	)
+	if status != StatusPass {
+		t.Fatalf("selected-address security status = %s", status)
+	}
+}
+
 func TestBuildExternalNetworksWarnsAboutVisibilityBoundary(
 	t *testing.T,
 ) {
@@ -334,6 +435,150 @@ func TestBuildUsesFinalOVSDatapathAction(t *testing.T) {
 			result.Verdict,
 			result.Findings,
 		)
+	}
+}
+
+func TestBuildLetsLiveDeliveryOverrideDroppedPlanTrace(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	ovsPath := topology.OVSPath{
+		Source: topology.OVSEndpoint{
+			Host:      "stack1",
+			Interface: "tap-source",
+			OFPort:    1,
+			LinkState: "up",
+		},
+		Destination: topology.OVSEndpoint{
+			Host:      "stack2",
+			Interface: "tap-destination",
+			OFPort:    2,
+			LinkState: "up",
+		},
+		Trace: "Datapath actions: drop",
+	}
+	probe := topology.ProbeResult{
+		Injected:  true,
+		Delivered: true,
+		Marker:    "icmp-id:42",
+	}
+
+	result := Build(Input{
+		Neutron:        path,
+		OVS:            &ovsPath,
+		OVSRequested:   true,
+		Probe:          &probe,
+		ProbeRequested: true,
+	})
+
+	if result.Verdict != StatusWarning {
+		t.Fatalf(
+			"Verdict = %s, want WARN; findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	message := findingMessage(result, "ovs-trace", StatusWarning)
+	if !strings.Contains(message, "live evidence wins") ||
+		!strings.Contains(message, "runtime conntrack") {
+		t.Fatalf("OVS trace conflict cause missing: %q", message)
+	}
+}
+
+func TestBuildLetsObservedDeliveryOverrideIncompleteOVNTrace(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	ovnPath := topology.OVNPath{
+		Source: topology.OVNEndpoint{
+			PortBindingUUID: "source-binding",
+			Up:              true,
+			ChassisName:     "stack1",
+		},
+		Destination: topology.OVNEndpoint{
+			PortBindingUUID: "destination-binding",
+			Up:              true,
+			ChassisName:     "stack2",
+		},
+		Trace: "drop;",
+	}
+	probe := topology.ProbeResult{
+		Mode:                       "observe",
+		SourceObservationAttempted: true,
+		SourceObserved:             true,
+		Delivered:                  true,
+		Marker:                     "ipv4-id:42",
+	}
+
+	result := Build(Input{
+		Neutron:        path,
+		OVN:            &ovnPath,
+		OVNRequested:   true,
+		Probe:          &probe,
+		ProbeRequested: true,
+	})
+
+	if result.Verdict != StatusWarning {
+		t.Fatalf(
+			"Verdict = %s, want WARN; findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	message := findingMessage(result, "ovn-trace", StatusWarning)
+	if !strings.Contains(message, "exact observed endpoint-tap delivery") ||
+		!strings.Contains(message, "live evidence wins") {
+		t.Fatalf("OVN trace conflict cause missing: %q", message)
+	}
+}
+
+func TestBuildDoesNotHideEndpointHealthFailureBehindLiveEvidence(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	ovsPath := topology.OVSPath{
+		Source: topology.OVSEndpoint{
+			Host:      "stack1",
+			Interface: "tap-source",
+			OFPort:    1,
+			LinkState: "down",
+		},
+		Destination: topology.OVSEndpoint{
+			Host:      "stack2",
+			Interface: "tap-destination",
+			OFPort:    2,
+			LinkState: "up",
+		},
+		Trace: "Datapath actions: drop",
+	}
+	probe := topology.ProbeResult{
+		Injected:  true,
+		Delivered: true,
+		Marker:    "icmp-id:42",
+	}
+
+	result := Build(Input{
+		Neutron:        path,
+		OVS:            &ovsPath,
+		OVSRequested:   true,
+		Probe:          &probe,
+		ProbeRequested: true,
+	})
+
+	if result.Verdict != StatusFail {
+		t.Fatalf(
+			"Verdict = %s, want FAIL; findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	if !hasFinding(result, "source-ovs", StatusFail) {
+		t.Fatalf("source endpoint health failure was hidden: %v", result.Findings)
+	}
+	if !hasFinding(result, "ovs-trace", StatusWarning) {
+		t.Fatalf("trace conflict was not downgraded: %v", result.Findings)
 	}
 }
 

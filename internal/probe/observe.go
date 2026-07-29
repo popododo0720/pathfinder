@@ -167,8 +167,8 @@ func buildObservationSpec(
 	microflow string,
 ) (observationSpec, error) {
 	sourceIP, destinationIP, err := compatibleIPv4(
-		path.Source.Endpoint.FixedIPs,
-		path.Destination.Endpoint.FixedIPs,
+		path.Source.FlowFixedIPs(),
+		path.Destination.FlowFixedIPs(),
 	)
 	if err != nil {
 		return observationSpec{}, err
