@@ -135,6 +135,66 @@ func TestBuildMicroflowUsesSelectedMultiIPv4Addresses(t *testing.T) {
 	}
 }
 
+func TestBuildMicroflowUsesKnownRouterNextHopMAC(t *testing.T) {
+	t.Parallel()
+
+	source := endpointContext(
+		"source",
+		"fa:16:3e:00:00:01",
+		"source-network",
+		"10.0.0.10",
+	)
+	destination := endpointContext(
+		"destination",
+		"fa:16:3e:00:00:02",
+		"destination-network",
+		"192.0.2.20",
+	)
+
+	flow, err := BuildMicroflowWithNextHop(
+		source,
+		destination,
+		"tcp.dst == 443",
+		"fa:16:3e:ff:ff:fe",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(flow, "eth.dst == fa:16:3e:ff:ff:fe") {
+		t.Fatalf("microflow = %q", flow)
+	}
+}
+
+func TestBuildMicroflowPrefersExplicitNextHopMAC(t *testing.T) {
+	t.Parallel()
+
+	source := endpointContext(
+		"source",
+		"fa:16:3e:00:00:01",
+		"source-network",
+		"10.0.0.10",
+	)
+	destination := endpointContext(
+		"destination",
+		"fa:16:3e:00:00:02",
+		"destination-network",
+		"192.0.2.20",
+	)
+	flow, err := BuildMicroflowWithNextHop(
+		source,
+		destination,
+		"eth.dst == fa:16:3e:aa:aa:aa && tcp.dst == 443",
+		"fa:16:3e:ff:ff:fe",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(flow, "eth.dst == fa:16:3e:aa:aa:aa") ||
+		strings.Contains(flow, "eth.dst == fa:16:3e:ff:ff:fe") {
+		t.Fatalf("microflow = %q", flow)
+	}
+}
+
 func endpointContext(
 	portID string,
 	macAddress string,

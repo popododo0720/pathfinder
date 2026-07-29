@@ -52,6 +52,66 @@ func LongestMatchingRouterRoute(
 	return selectedRoute, selectedBits >= 0
 }
 
+func KnownRouterNextHop(
+	path NeutronPath,
+) (RouterInterface, bool) {
+	sourceIP, destinationIP, found := compatibleRouteAddresses(
+		path.Source.FlowFixedIPs(),
+		path.Destination.FlowFixedIPs(),
+	)
+	if !found || !RequiresNextHop(
+		path.Source,
+		path.Destination,
+		sourceIP,
+		destinationIP,
+	) {
+		return RouterInterface{}, false
+	}
+
+	sourceSubnetID := subnetIDForAddress(
+		path.Source.FlowFixedIPs(),
+		sourceIP,
+	)
+	sourceSubnets := subnetsForID(
+		path.Source.FlowSubnets(),
+		sourceSubnetID,
+	)
+	nextHopIP := netip.Addr{}
+	if _, route, routeFound := LongestMatchingHostRoute(
+		sourceSubnets,
+		destinationIP,
+	); routeFound {
+		nextHopIP, _ = netip.ParseAddr(route.NextHop)
+	}
+	if !nextHopIP.IsValid() {
+		for _, subnet := range sourceSubnets {
+			candidate, err := netip.ParseAddr(subnet.GatewayIP)
+			if err == nil &&
+				candidate.Is4() == sourceIP.Is4() {
+				nextHopIP = candidate
+				break
+			}
+		}
+	}
+	if !nextHopIP.IsValid() {
+		return RouterInterface{}, false
+	}
+
+	for _, router := range path.Routers {
+		for _, candidate := range router.Interfaces {
+			if candidate.SubnetID != sourceSubnetID ||
+				candidate.MACAddress == "" {
+				continue
+			}
+			address, err := netip.ParseAddr(candidate.IPAddress)
+			if err == nil && address == nextHopIP {
+				return candidate, true
+			}
+		}
+	}
+	return RouterInterface{}, false
+}
+
 func RequiresNextHop(
 	source EndpointContext,
 	destination EndpointContext,
@@ -86,6 +146,28 @@ func RequiresNextHop(
 		return sourceSubnetID != destinationSubnetID
 	}
 	return false
+}
+
+func compatibleRouteAddresses(
+	source []FixedIP,
+	destination []FixedIP,
+) (netip.Addr, netip.Addr, bool) {
+	for _, sourceFixedIP := range source {
+		sourceIP, err := netip.ParseAddr(sourceFixedIP.Address)
+		if err != nil {
+			continue
+		}
+		for _, destinationFixedIP := range destination {
+			destinationIP, err := netip.ParseAddr(
+				destinationFixedIP.Address,
+			)
+			if err == nil &&
+				sourceIP.Is4() == destinationIP.Is4() {
+				return sourceIP, destinationIP, true
+			}
+		}
+	}
+	return netip.Addr{}, netip.Addr{}, false
 }
 
 func hostRouteOverridesConnected(

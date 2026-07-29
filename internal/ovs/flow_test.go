@@ -86,6 +86,68 @@ func TestBuildTraceFlowUsesExplicitNextHopMAC(t *testing.T) {
 	}
 }
 
+func TestBuildTraceFlowUsesKnownRouterNextHopMAC(t *testing.T) {
+	t.Parallel()
+
+	source := testEndpoint(
+		"source",
+		"fa:16:3e:00:00:01",
+		"source-network",
+		"10.0.0.10",
+	)
+	destination := testEndpoint(
+		"destination",
+		"fa:16:3e:00:00:02",
+		"destination-network",
+		"192.0.2.20",
+	)
+
+	flow, err := BuildTraceFlowWithNextHop(
+		source,
+		destination,
+		5,
+		"tcp.dst == 443",
+		"fa:16:3e:ff:ff:fe",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(flow, "dl_dst=fa:16:3e:ff:ff:fe") {
+		t.Fatalf("flow = %q", flow)
+	}
+}
+
+func TestBuildTraceFlowPrefersExplicitNextHopMAC(t *testing.T) {
+	t.Parallel()
+
+	source := testEndpoint(
+		"source",
+		"fa:16:3e:00:00:01",
+		"source-network",
+		"10.0.0.10",
+	)
+	destination := testEndpoint(
+		"destination",
+		"fa:16:3e:00:00:02",
+		"destination-network",
+		"192.0.2.20",
+	)
+	flow, err := BuildTraceFlowWithNextHop(
+		source,
+		destination,
+		5,
+		"eth.dst == fa:16:3e:aa:aa:aa && tcp.dst == 443",
+		"fa:16:3e:ff:ff:fe",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(flow, "dl_dst=fa:16:3e:aa:aa:aa") ||
+		strings.Contains(flow, "dl_dst=fa:16:3e:ff:ff:fe") {
+		t.Fatalf("flow = %q", flow)
+	}
+}
+
 func TestBuildTraceFlowDefaultsPlainICMPToIPv4ICMP(t *testing.T) {
 	t.Parallel()
 

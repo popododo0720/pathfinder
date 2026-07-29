@@ -86,10 +86,17 @@ func (client *Client) DiscoverPath(
 	source := sourceObservation.endpoint
 	destination := destinationObservation.endpoint
 
-	microflow, err := BuildMicroflow(
+	knownNextHopMAC := ""
+	if nextHop, found := topology.KnownRouterNextHop(
+		neutronPath,
+	); found {
+		knownNextHopMAC = nextHop.MACAddress
+	}
+	microflow, err := BuildMicroflowWithNextHop(
 		neutronPath.Source,
 		neutronPath.Destination,
 		extraMicroflow,
+		knownNextHopMAC,
 	)
 	if err != nil {
 		return topology.OVNPath{}, err

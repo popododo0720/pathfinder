@@ -14,12 +14,31 @@ var ErrNoCompatibleFixedIPs = errors.New(
 	"source and destination have no compatible fixed IPs",
 )
 
-var plainICMPPattern = regexp.MustCompile(`(?i)\bicmp\b`)
+var (
+	plainICMPPattern           = regexp.MustCompile(`(?i)\bicmp\b`)
+	ethernetDestinationPattern = regexp.MustCompile(
+		`(?i)\beth\.dst\s*==\s*[0-9a-f:]{17}`,
+	)
+)
 
 func BuildMicroflow(
 	source topology.EndpointContext,
 	destination topology.EndpointContext,
 	extra string,
+) (string, error) {
+	return BuildMicroflowWithNextHop(
+		source,
+		destination,
+		extra,
+		"",
+	)
+}
+
+func BuildMicroflowWithNextHop(
+	source topology.EndpointContext,
+	destination topology.EndpointContext,
+	extra string,
+	knownNextHopMAC string,
 ) (string, error) {
 	sourceIP, destinationIP, err := compatibleFixedIPs(
 		source.FlowFixedIPs(),
@@ -49,6 +68,12 @@ func BuildMicroflow(
 				"eth.dst == %s",
 				destination.Endpoint.MACAddress,
 			),
+		)
+	} else if knownNextHopMAC != "" &&
+		!ethernetDestinationPattern.MatchString(extra) {
+		conditions = append(
+			conditions,
+			fmt.Sprintf("eth.dst == %s", knownNextHopMAC),
 		)
 	}
 

@@ -94,11 +94,18 @@ func DiscoverPath(
 	source := sourceObservation.endpoint
 	destination := destinationObservation.endpoint
 
-	flow, err := BuildTraceFlow(
+	knownNextHopMAC := ""
+	if nextHop, found := topology.KnownRouterNextHop(
+		neutronPath,
+	); found {
+		knownNextHopMAC = nextHop.MACAddress
+	}
+	flow, err := BuildTraceFlowWithNextHop(
 		neutronPath.Source,
 		neutronPath.Destination,
 		source.OFPort,
 		extraMicroflow,
+		knownNextHopMAC,
 	)
 	if err != nil {
 		return topology.OVSPath{}, err

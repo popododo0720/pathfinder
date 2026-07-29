@@ -142,3 +142,75 @@ func TestRequiresNextHopKeepsConnectedRouteOverLessSpecificHostRoute(
 		t.Fatal("less-specific host route overrode the connected subnet")
 	}
 }
+
+func TestKnownRouterNextHopUsesSourceGatewayInterface(t *testing.T) {
+	t.Parallel()
+
+	path := routedTopologyPath()
+	path.Routers = []Router{{
+		Interfaces: []RouterInterface{{
+			SubnetID:   "source-subnet",
+			IPAddress:  "192.0.2.1",
+			MACAddress: "fa:16:3e:00:00:fe",
+		}},
+	}}
+
+	nextHop, found := KnownRouterNextHop(path)
+	if !found {
+		t.Fatal("known router next hop was not found")
+	}
+	if nextHop.IPAddress != "192.0.2.1" ||
+		nextHop.MACAddress != "fa:16:3e:00:00:fe" {
+		t.Fatalf("next hop = %+v", nextHop)
+	}
+}
+
+func TestKnownRouterNextHopUsesHostRouteInterface(t *testing.T) {
+	t.Parallel()
+
+	path := routedTopologyPath()
+	path.Source.Subnets[0].HostRoutes = []HostRoute{{
+		Destination: "198.51.100.0/24",
+		NextHop:     "192.0.2.254",
+	}}
+	path.Routers = []Router{{
+		Interfaces: []RouterInterface{{
+			SubnetID:   "source-subnet",
+			IPAddress:  "192.0.2.254",
+			MACAddress: "fa:16:3e:00:00:fd",
+		}},
+	}}
+
+	nextHop, found := KnownRouterNextHop(path)
+	if !found || nextHop.IPAddress != "192.0.2.254" {
+		t.Fatalf("next hop = %+v, found=%t", nextHop, found)
+	}
+}
+
+func routedTopologyPath() NeutronPath {
+	return NeutronPath{
+		Source: EndpointContext{
+			Endpoint: Endpoint{
+				NetworkID: "source-network",
+				FixedIPs: []FixedIP{{
+					Address:  "192.0.2.10",
+					SubnetID: "source-subnet",
+				}},
+			},
+			Subnets: []Subnet{{
+				ID:        "source-subnet",
+				CIDR:      "192.0.2.0/24",
+				GatewayIP: "192.0.2.1",
+			}},
+		},
+		Destination: EndpointContext{
+			Endpoint: Endpoint{
+				NetworkID: "destination-network",
+				FixedIPs: []FixedIP{{
+					Address:  "198.51.100.20",
+					SubnetID: "destination-subnet",
+				}},
+			},
+		},
+	}
+}

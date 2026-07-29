@@ -34,6 +34,22 @@ func BuildTraceFlow(
 	sourceOFPort int,
 	extra string,
 ) (string, error) {
+	return BuildTraceFlowWithNextHop(
+		source,
+		destination,
+		sourceOFPort,
+		extra,
+		"",
+	)
+}
+
+func BuildTraceFlowWithNextHop(
+	source topology.EndpointContext,
+	destination topology.EndpointContext,
+	sourceOFPort int,
+	extra string,
+	knownNextHopMAC string,
+) (string, error) {
 	sourceIP, destinationIP, err := compatibleFixedIPs(
 		source.FlowFixedIPs(),
 		destination.FlowFixedIPs(),
@@ -59,6 +75,8 @@ func BuildTraceFlow(
 		extra,
 	); len(matches) == 2 {
 		destinationMAC = matches[1]
+	} else if knownNextHopMAC != "" {
+		destinationMAC = knownNextHopMAC
 	}
 	if destinationMAC != "" {
 		fields = append(fields, "dl_dst="+destinationMAC)
