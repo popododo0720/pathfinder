@@ -134,35 +134,110 @@ func TestGetEndpointReportsMissingLogicalPort(t *testing.T) {
 	}
 }
 
-func TestSummaryTracePreservesConnectionStateOrder(t *testing.T) {
+func TestTraceWithSummaryUsesSingleDetailedInvocation(t *testing.T) {
 	t.Parallel()
 
 	runner := &fakeRunner{responses: map[string]string{
-		"ovn-trace --summary --ct trk,new --ct trk,est switch flow": "summary",
+		"ovn-trace --detailed --summary --ct trk,new --ct trk,est switch flow": `# tcp
+# Detailed trace.
+detailed trace
+# Summary trace.
+summary trace`,
 	}}
 	client := NewClient(runner, Config{
 		Host:      "central",
 		Container: "ovn_northd",
 	})
 
-	trace, err := client.SummaryTrace(
+	trace, summary, err := client.TraceWithSummary(
 		context.Background(),
 		"switch",
 		"flow",
 		[]string{"trk,new", "trk,est"},
+		false,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if trace != "summary" {
-		t.Fatalf("trace = %q, want summary", trace)
+	if trace != "# tcp\ndetailed trace" {
+		t.Fatalf("trace = %q", trace)
+	}
+	if summary != "# tcp\nsummary trace" {
+		t.Fatalf("summary = %q", summary)
+	}
+	if len(runner.commands) != 1 {
+		t.Fatalf(
+			"ovn-trace command count = %d, want 1: %v",
+			len(runner.commands),
+			runner.commands,
+		)
 	}
 }
 
-func TestDiscoverPathKeepsDetailedTraceWhenSummaryFails(t *testing.T) {
+func TestTraceWithSummarySelectsMinimalSection(t *testing.T) {
 	t.Parallel()
 
-	runner := &summaryFailureRunner{}
+	runner := &fakeRunner{responses: map[string]string{
+		"ovn-trace --summary --minimal --ct trk,est switch flow": "# udp\r\n" +
+			"  # Summary trace.  \r\nsummary trace\r\n" +
+			"# Minimal trace.\r\nminimal trace\r\n",
+	}}
+	client := NewClient(runner, Config{
+		Host:      "central",
+		Container: "ovn_northd",
+	})
+
+	trace, summary, err := client.TraceWithSummary(
+		context.Background(),
+		"switch",
+		"flow",
+		[]string{"trk,est"},
+		true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trace != "# udp\nminimal trace" {
+		t.Fatalf("trace = %q", trace)
+	}
+	if summary != "# udp\nsummary trace" {
+		t.Fatalf("summary = %q", summary)
+	}
+	if len(runner.commands) != 1 {
+		t.Fatalf(
+			"ovn-trace command count = %d, want 1: %v",
+			len(runner.commands),
+			runner.commands,
+		)
+	}
+}
+
+func TestSplitTraceOutputFallsBackWithoutExpectedBanners(t *testing.T) {
+	t.Parallel()
+
+	const output = "# flow\nlegacy detailed trace"
+	trace, summary := splitTraceOutput(output, false)
+	if trace != output {
+		t.Fatalf("trace = %q, want full output %q", trace, output)
+	}
+	if summary != "" {
+		t.Fatalf("summary = %q, want empty fallback", summary)
+	}
+}
+
+func TestDiscoverPathUsesOneTraceAndFallsBackWithoutBanners(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	runner := &fakeRunner{responses: map[string]string{
+		"central|sh|-c": "lsp_uuid=lsp-uuid\n" +
+			"logical_switch=network\n" +
+			"binding_uuid=binding-uuid\n" +
+			"datapath_uuid=datapath\n" +
+			"up=true\n",
+		"ovn-trace --detailed --summary": "legacy detailed trace",
+	}}
 	client := NewClient(runner, Config{
 		Host:      "central",
 		Container: "ovn_northd",
@@ -192,38 +267,26 @@ func TestDiscoverPathKeepsDetailedTraceWhenSummaryFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path.Trace != "detailed trace" {
+	if path.Trace != "legacy detailed trace" {
 		t.Fatalf("detailed trace = %q", path.Trace)
 	}
 	if path.SummaryTrace != "" {
 		t.Fatalf("summary trace = %q, want empty fallback", path.SummaryTrace)
 	}
-}
 
-type summaryFailureRunner struct{}
-
-func (*summaryFailureRunner) Run(
-	_ context.Context,
-	_ string,
-	name string,
-	args ...string,
-) (execx.Result, error) {
-	if name == "sh" {
-		port := args[len(args)-1]
-		return execx.Result{
-			Stdout: "lsp_uuid=" + port + "-uuid\n" +
-				"logical_switch=network\n" +
-				"binding_uuid=" + port + "-binding\n" +
-				"datapath_uuid=datapath\n" +
-				"up=true\n",
-		}, nil
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	traceCommands := 0
+	for _, command := range runner.commands {
+		if strings.Contains(command, "ovn-trace") {
+			traceCommands++
+		}
 	}
-	command := strings.Join(args, " ")
-	if strings.Contains(command, "--summary") {
-		return execx.Result{}, errors.New("summary unsupported")
+	if traceCommands != 1 {
+		t.Fatalf(
+			"ovn-trace command count = %d, want 1: %v",
+			traceCommands,
+			runner.commands,
+		)
 	}
-	if strings.Contains(command, "ovn-trace") {
-		return execx.Result{Stdout: "detailed trace"}, nil
-	}
-	return execx.Result{}, fmt.Errorf("unexpected command: %s %s", name, command)
 }

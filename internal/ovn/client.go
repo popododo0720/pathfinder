@@ -102,44 +102,23 @@ func (client *Client) DiscoverPath(
 		return topology.OVNPath{}, err
 	}
 
-	type traceResult struct {
-		output string
-		err    error
-	}
-	detailedResult := make(chan traceResult, 1)
-	summaryResult := make(chan traceResult, 1)
-	go func() {
-		trace, traceErr := client.Trace(
-			ctx,
-			source.LogicalSwitch,
-			microflow,
-			connectionStates,
-			minimal,
-		)
-		detailedResult <- traceResult{output: trace, err: traceErr}
-	}()
-	go func() {
-		trace, traceErr := client.SummaryTrace(
-			ctx,
-			source.LogicalSwitch,
-			microflow,
-			connectionStates,
-		)
-		summaryResult <- traceResult{output: trace, err: traceErr}
-	}()
-
-	detailed := <-detailedResult
-	summary := <-summaryResult
-	if detailed.err != nil {
-		return topology.OVNPath{}, detailed.err
+	trace, summaryTrace, err := client.TraceWithSummary(
+		ctx,
+		source.LogicalSwitch,
+		microflow,
+		connectionStates,
+		minimal,
+	)
+	if err != nil {
+		return topology.OVNPath{}, err
 	}
 
 	return topology.OVNPath{
 		Source:       source,
 		Destination:  destination,
 		Microflow:    microflow,
-		Trace:        detailed.output,
-		SummaryTrace: summary.output,
+		Trace:        trace,
+		SummaryTrace: summaryTrace,
 	}, nil
 }
 
@@ -235,16 +214,18 @@ printf 'lsp_uuid=%s\nlogical_switch=%s\nbinding_uuid=%s\ndatapath_uuid=%s\nchass
 	return parseSnapshot(result.Stdout), nil
 }
 
-func (client *Client) Trace(
+func (client *Client) TraceWithSummary(
 	ctx context.Context,
 	datapath string,
 	microflow string,
 	connectionStates []string,
 	minimal bool,
-) (string, error) {
-	args := make([]string, 0, len(connectionStates)*2+4)
+) (string, string, error) {
+	args := make([]string, 0, len(connectionStates)*2+5)
 	if minimal {
-		args = append(args, "--minimal")
+		args = append(args, "--summary", "--minimal")
+	} else {
+		args = append(args, "--detailed", "--summary")
 	}
 	args = appendTraceArguments(
 		args,
@@ -252,24 +233,12 @@ func (client *Client) Trace(
 		microflow,
 		connectionStates,
 	)
-	return client.run(ctx, "ovn-trace", args...)
-}
-
-func (client *Client) SummaryTrace(
-	ctx context.Context,
-	datapath string,
-	microflow string,
-	connectionStates []string,
-) (string, error) {
-	args := make([]string, 0, len(connectionStates)*2+4)
-	args = append(args, "--summary")
-	args = appendTraceArguments(
-		args,
-		datapath,
-		microflow,
-		connectionStates,
-	)
-	return client.run(ctx, "ovn-trace", args...)
+	output, err := client.run(ctx, "ovn-trace", args...)
+	if err != nil {
+		return "", "", err
+	}
+	trace, summary := splitTraceOutput(output, minimal)
+	return trace, summary, nil
 }
 
 func appendTraceArguments(
@@ -283,6 +252,81 @@ func appendTraceArguments(
 	}
 	args = append(args, datapath, microflow)
 	return args
+}
+
+func splitTraceOutput(
+	output string,
+	minimal bool,
+) (string, string) {
+	const (
+		detailedSection = "detailed"
+		summarySection  = "summary"
+		minimalSection  = "minimal"
+	)
+
+	preamble := make([]string, 0, 1)
+	sections := make(map[string][]string, 3)
+	seen := make(map[string]bool, 3)
+	current := ""
+	normalized := strings.ReplaceAll(output, "\r\n", "\n")
+	for _, line := range strings.Split(normalized, "\n") {
+		if section, found := traceOutputSection(line); found {
+			current = section
+			seen[section] = true
+			continue
+		}
+		if current == "" {
+			preamble = append(preamble, line)
+		} else {
+			sections[current] = append(sections[current], line)
+		}
+	}
+
+	rawSection := detailedSection
+	if minimal {
+		rawSection = minimalSection
+	}
+	if !seen[rawSection] || !seen[summarySection] {
+		return output, ""
+	}
+
+	return joinTraceSection(
+			preamble,
+			sections[rawSection],
+		),
+		joinTraceSection(
+			preamble,
+			sections[summarySection],
+		)
+}
+
+func traceOutputSection(line string) (string, bool) {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "#") {
+		return "", false
+	}
+	line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
+	line = strings.TrimSpace(strings.TrimSuffix(line, "."))
+	switch strings.ToLower(line) {
+	case "detailed trace":
+		return "detailed", true
+	case "summary trace":
+		return "summary", true
+	case "minimal trace":
+		return "minimal", true
+	default:
+		return "", false
+	}
+}
+
+func joinTraceSection(
+	preamble []string,
+	section []string,
+) string {
+	lines := make([]string, 0, len(preamble)+len(section))
+	lines = append(lines, preamble...)
+	lines = append(lines, section...)
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func (client *Client) sbGet(
