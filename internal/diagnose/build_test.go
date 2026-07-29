@@ -25,6 +25,36 @@ func TestBuildSameNetworkPasses(t *testing.T) {
 	}
 }
 
+func TestBuildShowsSelectedEndpointIdentity(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	path.Source.Endpoint.FixedIPs = append(
+		path.Source.Endpoint.FixedIPs,
+		topology.FixedIP{
+			Address:  "192.0.2.11",
+			SubnetID: "selected-subnet",
+		},
+	)
+	selected := path.Source.Endpoint.FixedIPs[1]
+	path.Source.SelectedFixedIP = &selected
+	path.Source.Network.Name = "tenant-blue"
+
+	result := Build(Input{Neutron: path})
+	var detail string
+	for _, hop := range result.Hops {
+		if hop.ID == "source-vm" {
+			detail = hop.Detail
+			break
+		}
+	}
+	if !strings.Contains(detail, "ip=192.0.2.11") ||
+		strings.Contains(detail, "ip=10.0.0.10") ||
+		!strings.Contains(detail, "network=tenant-blue") {
+		t.Fatalf("source identity detail = %q", detail)
+	}
+}
+
 func TestBuildSameNetworkDifferentSubnetsRequiresRoute(t *testing.T) {
 	t.Parallel()
 

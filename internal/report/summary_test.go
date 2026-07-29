@@ -25,6 +25,9 @@ func TestWriteSummaryJSONContainsCausesWithoutRawCaptures(t *testing.T) {
 						{Address: "192.0.2.10"},
 					},
 				},
+				SelectedFixedIP: &topology.FixedIP{
+					Address: "192.0.2.10",
+				},
 			},
 			Destination: topology.EndpointContext{
 				Endpoint: topology.Endpoint{
@@ -70,6 +73,12 @@ func TestWriteSummaryJSONContainsCausesWithoutRawCaptures(t *testing.T) {
 		[]byte("no matching packet reached the destination"),
 	) {
 		t.Fatalf("summary omitted cause: %s", output.String())
+	}
+	if !bytes.Contains(
+		output.Bytes(),
+		[]byte(`"selected_ip": "192.0.2.10"`),
+	) {
+		t.Fatalf("summary omitted selected IP: %s", output.String())
 	}
 }
 

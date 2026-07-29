@@ -18,7 +18,7 @@ func Build(input Input) Report {
 	)
 
 	sourceVMStatus, sourceVMDetail := endpointStatus(
-		input.Neutron.Source.Endpoint,
+		input.Neutron.Source,
 	)
 	builder.addHop(Hop{
 		ID:     "source-vm",
@@ -50,7 +50,7 @@ func Build(input Input) Report {
 		)
 		builder.addHop(Hop{
 			ID:     "source-ovs",
-			Label:  "source compute OVS br-int",
+			Label:  "source OVS port binding",
 			Status: status,
 			Detail: detail,
 		})
@@ -115,7 +115,7 @@ func Build(input Input) Report {
 		)
 		builder.addHop(Hop{
 			ID:     "destination-ovs",
-			Label:  "destination compute OVS br-int",
+			Label:  "destination OVS port binding",
 			Status: status,
 			Detail: detail,
 		})
@@ -143,7 +143,7 @@ func Build(input Input) Report {
 	)
 
 	destinationVMStatus, destinationVMDetail := endpointStatus(
-		input.Neutron.Destination.Endpoint,
+		input.Neutron.Destination,
 	)
 	builder.addHop(Hop{
 		ID: "destination-vm",
@@ -431,7 +431,8 @@ func severity(status Status) int {
 	}
 }
 
-func endpointStatus(endpoint topology.Endpoint) (Status, string) {
+func endpointStatus(context topology.EndpointContext) (Status, string) {
+	endpoint := context.Endpoint
 	switch {
 	case endpoint.Status != "ACTIVE":
 		return StatusFail, "Neutron port status is " + endpoint.Status
@@ -446,13 +447,39 @@ func endpointStatus(endpoint topology.Endpoint) (Status, string) {
 	case endpoint.VIFType == "binding_failed":
 		return StatusFail, "Neutron VIF binding failed"
 	default:
+		var addresses []string
+		for _, fixedIP := range context.FlowFixedIPs() {
+			if fixedIP.Address != "" {
+				addresses = append(addresses, fixedIP.Address)
+			}
+		}
+		network := context.Network.Name
+		if network == "" {
+			network = context.Network.ID
+		}
 		return StatusPass, fmt.Sprintf(
-			"ACTIVE on %s, owner=%s, vif=%s",
+			"ACTIVE on %s, owner=%s, vif=%s, ip=%s, network=%s",
 			endpoint.HostID,
 			endpoint.DeviceOwner,
 			endpoint.VIFType,
+			displayIdentityValues(addresses),
+			displayIdentityValue(network),
 		)
 	}
+}
+
+func displayIdentityValues(values []string) string {
+	if len(values) == 0 {
+		return "-"
+	}
+	return strings.Join(values, ",")
+}
+
+func displayIdentityValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
 }
 
 func endpointLabel(role string, endpoint topology.Endpoint) string {

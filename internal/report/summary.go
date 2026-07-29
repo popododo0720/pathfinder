@@ -19,12 +19,13 @@ type Summary struct {
 }
 
 type EndpointSummary struct {
-	PortID    string   `json:"port_id"`
-	Name      string   `json:"name,omitempty"`
-	Host      string   `json:"host,omitempty"`
-	MAC       string   `json:"mac,omitempty"`
-	FixedIPs  []string `json:"fixed_ips,omitempty"`
-	NetworkID string   `json:"network_id,omitempty"`
+	PortID     string   `json:"port_id"`
+	Name       string   `json:"name,omitempty"`
+	Host       string   `json:"host,omitempty"`
+	MAC        string   `json:"mac,omitempty"`
+	FixedIPs   []string `json:"fixed_ips,omitempty"`
+	SelectedIP string   `json:"selected_ip,omitempty"`
+	NetworkID  string   `json:"network_id,omitempty"`
 }
 
 type HopSummary struct {
@@ -98,13 +99,18 @@ func endpointSummary(
 	for index, fixedIP := range context.Endpoint.FixedIPs {
 		fixedIPs[index] = fixedIP.Address
 	}
+	selectedIP := ""
+	if context.SelectedFixedIP != nil {
+		selectedIP = context.SelectedFixedIP.Address
+	}
 	return EndpointSummary{
-		PortID:    context.Endpoint.PortID,
-		Name:      context.Endpoint.Name,
-		Host:      context.Endpoint.HostID,
-		MAC:       context.Endpoint.MACAddress,
-		FixedIPs:  fixedIPs,
-		NetworkID: context.Endpoint.NetworkID,
+		PortID:     context.Endpoint.PortID,
+		Name:       context.Endpoint.Name,
+		Host:       context.Endpoint.HostID,
+		MAC:        context.Endpoint.MACAddress,
+		FixedIPs:   fixedIPs,
+		SelectedIP: selectedIP,
+		NetworkID:  context.Endpoint.NetworkID,
 	}
 }
 
