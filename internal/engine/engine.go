@@ -227,11 +227,13 @@ func analyzeProbe(
 		)
 	}
 	result.duration = time.Since(started)
+	if probeResult.Mode != "" {
+		result.value = &probeResult
+	}
 	if err != nil {
 		result.err = fmt.Errorf("run live probe: %w", err)
 		return result
 	}
-	result.value = &probeResult
 	return result
 }
 

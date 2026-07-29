@@ -393,7 +393,7 @@ func (model Model) probeContent() string {
 	if model.result == nil {
 		return "No probe result"
 	}
-	if model.result.ProbeError != nil {
+	if model.result.ProbeError != nil && model.result.Probe == nil {
 		return "LIVE PROBE ERROR\n\n" + model.result.ProbeError.Error()
 	}
 	if model.result.Probe == nil {
@@ -407,6 +407,11 @@ func (model Model) probeContent() string {
 	status := "NOT DELIVERED"
 	if probe.Delivered {
 		status = "DELIVERED"
+	}
+	errorDetail := ""
+	if model.result.ProbeError != nil {
+		status = "ERROR"
+		errorDetail = "\nCause: " + model.result.ProbeError.Error()
 	}
 	reply := "not expected"
 	if probe.ReplyExpected {
@@ -438,9 +443,10 @@ func (model Model) probeContent() string {
 		}
 	}
 	return fmt.Sprintf(
-		"%s: %s\n\nMethod: %s\nMarker: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nNext hop: %s\nInjected: %t\nSource tap: %s\nExact destination capture: %t\nReply: %s\nDuration: %s\n\nRequest filter:\n%s\n\nReply filter:\n%s\n\n%s",
+		"%s: %s%s\n\nMethod: %s\nMarker: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nNext hop: %s\nInjected: %t\nSource tap: %s\nExact destination capture: %t\nReply: %s\nDuration: %s\n\nRequest filter:\n%s\n\nReply filter:\n%s\n\n%s",
 		mode,
 		status,
+		errorDetail,
 		probe.Method,
 		probe.Marker,
 		probe.Protocol,

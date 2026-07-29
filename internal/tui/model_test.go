@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +127,30 @@ func TestObserveModeShowsObservedTraffic(t *testing.T) {
 	if !strings.Contains(view, "OBSERVE") ||
 		!strings.Contains(view, "Source tap: matching packet observed") {
 		t.Fatalf("observe mode is not clear:\n%s", view)
+	}
+}
+
+func TestProbeTabShowsCauseAndPartialProgress(t *testing.T) {
+	t.Parallel()
+
+	model := testModel()
+	result := testResult()
+	result.Probe.Delivered = false
+	result.ProbeError = errors.New(
+		"capture on tap-destination: tcpdump permission denied",
+	)
+	model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	model.Update(analysisFinishedMsg{
+		generation: model.generation,
+		result:     result,
+	})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
+
+	view := model.View()
+	if !strings.Contains(view, "LIVE: ERROR") ||
+		!strings.Contains(view, "tcpdump permission denied") ||
+		!strings.Contains(view, "Injected: true") {
+		t.Fatalf("partial probe cause/progress is missing:\n%s", view)
 	}
 }
 
