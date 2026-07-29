@@ -102,22 +102,44 @@ func (client *Client) DiscoverPath(
 		return topology.OVNPath{}, err
 	}
 
-	trace, err := client.Trace(
-		ctx,
-		source.LogicalSwitch,
-		microflow,
-		connectionStates,
-		minimal,
-	)
-	if err != nil {
-		return topology.OVNPath{}, err
+	type traceResult struct {
+		output string
+		err    error
+	}
+	detailedResult := make(chan traceResult, 1)
+	summaryResult := make(chan traceResult, 1)
+	go func() {
+		trace, traceErr := client.Trace(
+			ctx,
+			source.LogicalSwitch,
+			microflow,
+			connectionStates,
+			minimal,
+		)
+		detailedResult <- traceResult{output: trace, err: traceErr}
+	}()
+	go func() {
+		trace, traceErr := client.SummaryTrace(
+			ctx,
+			source.LogicalSwitch,
+			microflow,
+			connectionStates,
+		)
+		summaryResult <- traceResult{output: trace, err: traceErr}
+	}()
+
+	detailed := <-detailedResult
+	summary := <-summaryResult
+	if detailed.err != nil {
+		return topology.OVNPath{}, detailed.err
 	}
 
 	return topology.OVNPath{
-		Source:      source,
-		Destination: destination,
-		Microflow:   microflow,
-		Trace:       trace,
+		Source:       source,
+		Destination:  destination,
+		Microflow:    microflow,
+		Trace:        detailed.output,
+		SummaryTrace: summary.output,
 	}, nil
 }
 
@@ -224,12 +246,43 @@ func (client *Client) Trace(
 	if minimal {
 		args = append(args, "--minimal")
 	}
+	args = appendTraceArguments(
+		args,
+		datapath,
+		microflow,
+		connectionStates,
+	)
+	return client.run(ctx, "ovn-trace", args...)
+}
+
+func (client *Client) SummaryTrace(
+	ctx context.Context,
+	datapath string,
+	microflow string,
+	connectionStates []string,
+) (string, error) {
+	args := make([]string, 0, len(connectionStates)*2+4)
+	args = append(args, "--summary")
+	args = appendTraceArguments(
+		args,
+		datapath,
+		microflow,
+		connectionStates,
+	)
+	return client.run(ctx, "ovn-trace", args...)
+}
+
+func appendTraceArguments(
+	args []string,
+	datapath string,
+	microflow string,
+	connectionStates []string,
+) []string {
 	for _, state := range connectionStates {
 		args = append(args, "--ct", state)
 	}
 	args = append(args, datapath, microflow)
-
-	return client.run(ctx, "ovn-trace", args...)
+	return args
 }
 
 func (client *Client) sbGet(

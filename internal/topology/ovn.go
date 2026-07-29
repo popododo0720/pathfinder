@@ -13,8 +13,9 @@ type OVNEndpoint struct {
 }
 
 type OVNPath struct {
-	Source      OVNEndpoint
-	Destination OVNEndpoint
-	Microflow   string
-	Trace       string
+	Source       OVNEndpoint
+	Destination  OVNEndpoint
+	Microflow    string
+	Trace        string
+	SummaryTrace string
 }

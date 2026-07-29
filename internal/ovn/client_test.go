@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"pathfinder/internal/execx"
+	"pathfinder/internal/topology"
 )
 
 type fakeRunner struct {
@@ -131,4 +132,98 @@ func TestGetEndpointReportsMissingLogicalPort(t *testing.T) {
 	if !errors.Is(err, ErrLogicalPortNotFound) {
 		t.Fatalf("GetEndpoint() error = %v", err)
 	}
+}
+
+func TestSummaryTracePreservesConnectionStateOrder(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeRunner{responses: map[string]string{
+		"ovn-trace --summary --ct trk,new --ct trk,est switch flow": "summary",
+	}}
+	client := NewClient(runner, Config{
+		Host:      "central",
+		Container: "ovn_northd",
+	})
+
+	trace, err := client.SummaryTrace(
+		context.Background(),
+		"switch",
+		"flow",
+		[]string{"trk,new", "trk,est"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trace != "summary" {
+		t.Fatalf("trace = %q, want summary", trace)
+	}
+}
+
+func TestDiscoverPathKeepsDetailedTraceWhenSummaryFails(t *testing.T) {
+	t.Parallel()
+
+	runner := &summaryFailureRunner{}
+	client := NewClient(runner, Config{
+		Host:      "central",
+		Container: "ovn_northd",
+	})
+	neutronPath := topology.NeutronPath{
+		Source: endpointContext(
+			"source-port",
+			"fa:16:3e:00:00:01",
+			"network",
+			"192.0.2.10",
+		),
+		Destination: endpointContext(
+			"destination-port",
+			"fa:16:3e:00:00:02",
+			"network",
+			"192.0.2.20",
+		),
+	}
+
+	path, err := client.DiscoverPath(
+		context.Background(),
+		neutronPath,
+		"icmp",
+		[]string{"trk,est"},
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path.Trace != "detailed trace" {
+		t.Fatalf("detailed trace = %q", path.Trace)
+	}
+	if path.SummaryTrace != "" {
+		t.Fatalf("summary trace = %q, want empty fallback", path.SummaryTrace)
+	}
+}
+
+type summaryFailureRunner struct{}
+
+func (*summaryFailureRunner) Run(
+	_ context.Context,
+	_ string,
+	name string,
+	args ...string,
+) (execx.Result, error) {
+	if name == "sh" {
+		port := args[len(args)-1]
+		return execx.Result{
+			Stdout: "lsp_uuid=" + port + "-uuid\n" +
+				"logical_switch=network\n" +
+				"binding_uuid=" + port + "-binding\n" +
+				"datapath_uuid=datapath\n" +
+				"up=true\n",
+		}, nil
+	}
+	command := strings.Join(args, " ")
+	if strings.Contains(command, "--summary") {
+		return execx.Result{}, errors.New("summary unsupported")
+	}
+	if strings.Contains(command, "ovn-trace") {
+		return execx.Result{Stdout: "detailed trace"}, nil
+	}
+	return execx.Result{}, fmt.Errorf("unexpected command: %s %s", name, command)
 }
