@@ -26,6 +26,14 @@ func runOutput(
 
 	result, err := engine.Analyze(ctx, options)
 	if err != nil {
+		if flags.output == "json" {
+			if writeError := report.WriteErrorJSON(
+				command.OutOrStdout(),
+				err,
+			); writeError != nil {
+				return errors.Join(err, writeError)
+			}
+		}
 		return err
 	}
 	if err := writeAnalysisOutput(

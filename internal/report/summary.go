@@ -48,6 +48,15 @@ type TimingSummary struct {
 	TotalMS   int64 `json:"total_ms"`
 }
 
+type ErrorSummary struct {
+	Verdict string            `json:"verdict"`
+	Error   ErrorCauseSummary `json:"error"`
+}
+
+type ErrorCauseSummary struct {
+	Cause string `json:"cause"`
+}
+
 func NewSummary(result engine.Result) Summary {
 	return Summary{
 		Verdict:     result.Diagnosis.Verdict,
@@ -69,6 +78,17 @@ func WriteSummaryJSON(writer io.Writer, result engine.Result) error {
 	encoder := json.NewEncoder(writer)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(NewSummary(result))
+}
+
+func WriteErrorJSON(writer io.Writer, analysisError error) error {
+	encoder := json.NewEncoder(writer)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(ErrorSummary{
+		Verdict: "ERROR",
+		Error: ErrorCauseSummary{
+			Cause: analysisError.Error(),
+		},
+	})
 }
 
 func endpointSummary(

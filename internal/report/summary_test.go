@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -69,5 +70,25 @@ func TestWriteSummaryJSONContainsCausesWithoutRawCaptures(t *testing.T) {
 		[]byte("no matching packet reached the destination"),
 	) {
 		t.Fatalf("summary omitted cause: %s", output.String())
+	}
+}
+
+func TestWriteErrorJSONReturnsMachineReadableCause(t *testing.T) {
+	t.Parallel()
+
+	var output bytes.Buffer
+	if err := WriteErrorJSON(
+		&output,
+		errors.New("endpoint selector is ambiguous"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	var summary ErrorSummary
+	if err := json.Unmarshal(output.Bytes(), &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.Verdict != "ERROR" ||
+		summary.Error.Cause != "endpoint selector is ambiguous" {
+		t.Fatalf("summary = %+v", summary)
 	}
 }
