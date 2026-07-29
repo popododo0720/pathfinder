@@ -1,6 +1,7 @@
 package diagnose
 
 import (
+	"strings"
 	"testing"
 
 	"pathfinder/internal/topology"
@@ -156,6 +157,57 @@ func TestBuildRecognizesExternalToInternalRouterPath(t *testing.T) {
 			result.Verdict,
 			result.Findings,
 		)
+	}
+}
+
+func TestBuildFailsWhenExternalRouterIsDown(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("external-network", "internal-network")
+	path.Source.Network.External = true
+	path.Routers = []topology.Router{
+		{
+			ID:                "router",
+			Name:              "router",
+			Status:            "DOWN",
+			AdminStateUp:      true,
+			ExternalNetworkID: "external-network",
+			InterfaceSubnets:  []string{"internal-network-subnet"},
+		},
+	}
+	result := Build(Input{
+		Neutron:   path,
+		Microflow: "tcp.dst == 443",
+	})
+	if result.Verdict != StatusFail {
+		t.Fatalf("Verdict = %s, findings=%v", result.Verdict, result.Findings)
+	}
+	if !hasFinding(result, "transport", StatusFail) {
+		t.Fatalf("transport failure not found: %v", result.Findings)
+	}
+	if !strings.Contains(
+		findingMessage(result, "transport", StatusFail),
+		"status=DOWN",
+	) {
+		t.Fatalf("router DOWN state missing from findings: %v", result.Findings)
+	}
+}
+
+func TestBuildIncludesUnknownHopsInFindings(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	path.Source.SecurityGroups = nil
+	result := Build(Input{
+		Neutron:   path,
+		Microflow: "tcp.dst == 443",
+	})
+
+	if result.Verdict != StatusUnknown {
+		t.Fatalf("Verdict = %s, findings=%v", result.Verdict, result.Findings)
+	}
+	if !hasFinding(result, "source-sg", StatusUnknown) {
+		t.Fatalf("source security-group UNKNOWN not found: %v", result.Findings)
 	}
 }
 
@@ -511,4 +563,17 @@ func hasFinding(
 		}
 	}
 	return false
+}
+
+func findingMessage(
+	report Report,
+	layer string,
+	status Status,
+) string {
+	for _, finding := range report.Findings {
+		if finding.Layer == layer && finding.Status == status {
+			return finding.Message
+		}
+	}
+	return ""
 }

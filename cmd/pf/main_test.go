@@ -81,6 +81,24 @@ func TestAnalysisFlagsRejectPlanAndObserveTogether(t *testing.T) {
 	}
 }
 
+func TestAnalysisFlagsRejectLiveModeWithoutOVS(t *testing.T) {
+	t.Parallel()
+
+	flags := &analysisFlags{}
+	if err := flags.validate(); err == nil {
+		t.Fatal("live mode accepted --ovs=false")
+	}
+}
+
+func TestAnalysisFlagsAllowPlanModeWithoutOVS(t *testing.T) {
+	t.Parallel()
+
+	flags := &analysisFlags{planOnly: true}
+	if err := flags.validate(); err != nil {
+		t.Fatalf("plan mode rejected --ovs=false: %v", err)
+	}
+}
+
 func testAnalysisOptions(
 	t *testing.T,
 	flagArgs []string,

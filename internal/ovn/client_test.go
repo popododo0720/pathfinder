@@ -2,6 +2,7 @@ package ovn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -91,5 +92,26 @@ func TestGetEndpoint(t *testing.T) {
 			"PortBindingTunnel = %d",
 			endpoint.PortBindingTunnel,
 		)
+	}
+}
+
+func TestGetEndpointPropagatesContainerCommandFailure(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient(execx.SystemRunner{}, Config{
+		ContainerEngine: "/bin/false",
+		Container:       "missing-container",
+	})
+
+	_, err := client.GetEndpoint(context.Background(), "port-id")
+	if err == nil {
+		t.Fatal("GetEndpoint() succeeded when the container command failed")
+	}
+	if errors.Is(err, ErrLogicalPortNotFound) {
+		t.Fatalf("container failure was masked as a missing logical port: %v", err)
+	}
+	var commandError *execx.CommandError
+	if !errors.As(err, &commandError) {
+		t.Fatalf("GetEndpoint() error does not contain CommandError: %v", err)
 	}
 }

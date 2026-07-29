@@ -165,21 +165,21 @@ engine=$1
 container=$2
 port=$3
 run() { "$engine" exec "$container" "$@"; }
-lsp_uuid=$(run ovn-nbctl --if-exists get Logical_Switch_Port "$port" _uuid | head -n1)
-logical_switch=$(run ovn-nbctl lsp-get-ls "$port" | head -n1)
-binding_uuid=$(run ovn-sbctl --bare --no-headings --columns=_uuid find Port_Binding logical_port="$port" | head -n1)
+lsp_uuid=$(run ovn-nbctl --if-exists get Logical_Switch_Port "$port" _uuid)
+logical_switch=$(run ovn-nbctl lsp-get-ls "$port")
+binding_uuid=$(run ovn-sbctl --bare --no-headings --columns=_uuid find Port_Binding logical_port="$port")
 datapath_uuid=
 chassis_uuid=
 chassis_name=
 up=
 tunnel_key=
 if [ -n "$binding_uuid" ]; then
-    datapath_uuid=$(run ovn-sbctl --if-exists get Port_Binding "$binding_uuid" datapath | head -n1)
-    chassis_uuid=$(run ovn-sbctl --if-exists get Port_Binding "$binding_uuid" chassis | head -n1)
-    up=$(run ovn-sbctl --if-exists get Port_Binding "$binding_uuid" up | head -n1)
-    tunnel_key=$(run ovn-sbctl --if-exists get Port_Binding "$binding_uuid" tunnel_key | head -n1)
+    datapath_uuid=$(run ovn-sbctl --if-exists get Port_Binding "$binding_uuid" datapath)
+    chassis_uuid=$(run ovn-sbctl --if-exists get Port_Binding "$binding_uuid" chassis)
+    up=$(run ovn-sbctl --if-exists get Port_Binding "$binding_uuid" up)
+    tunnel_key=$(run ovn-sbctl --if-exists get Port_Binding "$binding_uuid" tunnel_key)
     if [ -n "$chassis_uuid" ]; then
-        chassis_name=$(run ovn-sbctl --if-exists get Chassis "$chassis_uuid" name | head -n1)
+        chassis_name=$(run ovn-sbctl --if-exists get Chassis "$chassis_uuid" name)
     fi
 fi
 printf 'lsp_uuid=%s\nlogical_switch=%s\nbinding_uuid=%s\ndatapath_uuid=%s\nchassis_uuid=%s\nchassis_name=%s\nup=%s\ntunnel_key=%s\n' \

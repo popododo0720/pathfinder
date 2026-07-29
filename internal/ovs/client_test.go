@@ -83,6 +83,27 @@ func TestGetEndpoint(t *testing.T) {
 	}
 }
 
+func TestGetEndpointPropagatesContainerCommandFailure(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient(execx.SystemRunner{}, Config{
+		ContainerEngine: "/bin/false",
+		Container:       "missing-container",
+	})
+
+	_, err := client.GetEndpoint(context.Background(), "port-id")
+	if err == nil {
+		t.Fatal("GetEndpoint() succeeded when the container command failed")
+	}
+	if errors.Is(err, ErrInterfaceNotFound) {
+		t.Fatalf("container failure was masked as a missing interface: %v", err)
+	}
+	var commandError *execx.CommandError
+	if !errors.As(err, &commandError) {
+		t.Fatalf("GetEndpoint() error does not contain CommandError: %v", err)
+	}
+}
+
 func TestCapturePacketReturnsExactMatch(t *testing.T) {
 	t.Parallel()
 

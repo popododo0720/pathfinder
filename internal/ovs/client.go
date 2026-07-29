@@ -164,14 +164,14 @@ engine=$1
 container=$2
 port=$3
 run() { "$engine" exec "$container" "$@"; }
-interface=$(run ovs-vsctl --bare --no-headings --columns=name find Interface external_ids:iface-id="$port" | head -n1)
+interface=$(run ovs-vsctl --bare --no-headings --columns=name find Interface external_ids:iface-id="$port")
 ofport=
 link_state=
 interface_error=
 if [ -n "$interface" ]; then
-    ofport=$(run ovs-vsctl --if-exists get Interface "$interface" ofport | head -n1)
-    link_state=$(run ovs-vsctl --if-exists get Interface "$interface" link_state | head -n1)
-    interface_error=$(run ovs-vsctl --if-exists get Interface "$interface" error | head -n1)
+    ofport=$(run ovs-vsctl --if-exists get Interface "$interface" ofport)
+    link_state=$(run ovs-vsctl --if-exists get Interface "$interface" link_state)
+    interface_error=$(run ovs-vsctl --if-exists get Interface "$interface" error)
 fi
 printf 'interface=%s\nofport=%s\nlink_state=%s\nerror=%s\n' \
     "$interface" "$ofport" "$link_state" "$interface_error"`

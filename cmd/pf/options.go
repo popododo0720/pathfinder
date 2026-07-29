@@ -194,6 +194,9 @@ func (flags *analysisFlags) validate() error {
 	if flags.observe && !flags.enableOVS {
 		return fmt.Errorf("--observe requires --ovs")
 	}
+	if !flags.planOnly && !flags.enableOVS {
+		return fmt.Errorf("live mode requires --ovs; use --plan with --ovs=false")
+	}
 	return validateConnectionStates(flags.connectionStates)
 }
 

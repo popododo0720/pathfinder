@@ -318,7 +318,9 @@ type reportBuilder struct {
 func (builder *reportBuilder) addHop(hop Hop) {
 	builder.hops = append(builder.hops, hop)
 	builder.raise(hop.Status)
-	if hop.Status == StatusFail || hop.Status == StatusWarning {
+	if hop.Status == StatusFail ||
+		hop.Status == StatusWarning ||
+		hop.Status == StatusUnknown {
 		builder.findings = append(builder.findings, Finding{
 			Layer:   hop.ID,
 			Status:  hop.Status,
@@ -522,15 +524,23 @@ func routeStatus(path topology.NeutronPath) (Status, string, string) {
 		}
 		if sourceAttached &&
 			router.ExternalNetworkID == path.Destination.Network.ID {
-			return StatusPass,
+			status := StatusPass
+			if !router.AdminStateUp || router.Status != "ACTIVE" {
+				status = StatusFail
+			}
+			return status,
 				"Neutron router to external network",
-				routerLabel(router)
+				routerStateDetail(router)
 		}
 		if destinationAttached &&
 			router.ExternalNetworkID == path.Source.Network.ID {
-			return StatusPass,
+			status := StatusPass
+			if !router.AdminStateUp || router.Status != "ACTIVE" {
+				status = StatusFail
+			}
+			return status,
 				"external network to Neutron router",
-				routerLabel(router)
+				routerStateDetail(router)
 		}
 	}
 
@@ -557,6 +567,15 @@ func routerLabel(router topology.Router) string {
 		return router.Name
 	}
 	return router.ID
+}
+
+func routerStateDetail(router topology.Router) string {
+	return fmt.Sprintf(
+		"%s status=%s admin_up=%t",
+		routerLabel(router),
+		router.Status,
+		router.AdminStateUp,
+	)
 }
 
 func subnetSet(subnets []topology.Subnet) map[string]struct{} {
