@@ -51,6 +51,20 @@ func TestRunReportsConcreteRemoteCauses(t *testing.T) {
 	if !hasStatusForCause(checks, StatusFail, "not available") {
 		t.Fatalf("remote failure cause missing: %+v", checks)
 	}
+	if countChecksContaining(checks, "compute-2") != 1 {
+		t.Fatalf("SSH root cause was repeated: %+v", checks)
+	}
+}
+
+func countChecksContaining(checks []Check, value string) int {
+	count := 0
+	for _, check := range checks {
+		if strings.Contains(check.Name, value) ||
+			strings.Contains(check.Cause, value) {
+			count++
+		}
+	}
+	return count
 }
 
 func TestRunExplainsMissingHosts(t *testing.T) {

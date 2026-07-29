@@ -43,6 +43,7 @@ func Run(ctx context.Context, options Options) []Check {
 		})
 		return checks
 	}
+	hostStatus := make(map[string]bool)
 
 	engine := options.ContainerEngine
 	if engine == "" {
@@ -63,7 +64,13 @@ func Run(ctx context.Context, options Options) []Check {
 			Status: StatusWarn,
 			Cause:  "no OVN host configured; use --ovn-host or PF_OVN_HOST",
 		})
-	} else {
+	} else if hostAvailable(
+		ctx,
+		runner,
+		options.OVNHost,
+		&checks,
+		hostStatus,
+	) {
 		checks = append(
 			checks,
 			checkContainerTool(
@@ -98,6 +105,9 @@ func Run(ctx context.Context, options Options) []Check {
 		return checks
 	}
 	for _, host := range hosts {
+		if !hostAvailable(ctx, runner, host, &checks, hostStatus) {
+			continue
+		}
 		checks = append(
 			checks,
 			checkHostTool(ctx, runner, host, "tcpdump"),
@@ -113,6 +123,32 @@ func Run(ctx context.Context, options Options) []Check {
 		)
 	}
 	return checks
+}
+
+func hostAvailable(
+	ctx context.Context,
+	runner execx.Runner,
+	host string,
+	checks *[]Check,
+	status map[string]bool,
+) bool {
+	if available, checked := status[host]; checked {
+		return available
+	}
+	_, err := runner.Run(ctx, host, "true")
+	available := err == nil
+	status[host] = available
+	check := Check{
+		Name:   "SSH to " + host,
+		Status: StatusPass,
+		Cause:  "remote command execution is available",
+	}
+	if err != nil {
+		check.Status = StatusFail
+		check.Cause = err.Error()
+	}
+	*checks = append(*checks, check)
+	return available
 }
 
 func checkOpenStack(
