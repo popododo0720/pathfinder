@@ -71,6 +71,7 @@ func TestEndpointOptionsRespectOSInterface(t *testing.T) {
 func TestTLSConfigRespectsOSInsecure(t *testing.T) {
 	clearOpenStackEnvironment(t)
 	t.Setenv("OS_INSECURE", "true")
+	t.Setenv("OS_CACERT", "/missing/ca.pem")
 
 	tlsConfig, err := tlsConfigFromEnvironment()
 	if err != nil {

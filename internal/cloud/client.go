@@ -183,6 +183,9 @@ func tlsConfigFromEnvironment() (*tls.Config, error) {
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: insecure, // #nosec G402 -- requested by OS_INSECURE
 	}
+	if insecure {
+		return tlsConfig, nil
+	}
 
 	caCertPath := strings.TrimSpace(os.Getenv("OS_CACERT"))
 	if caCertPath == "" {
@@ -192,7 +195,10 @@ func tlsConfigFromEnvironment() (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read OS_CACERT %q: %w", caCertPath, err)
 	}
-	certificatePool := x509.NewCertPool()
+	certificatePool, _ := x509.SystemCertPool()
+	if certificatePool == nil {
+		certificatePool = x509.NewCertPool()
+	}
 	if !certificatePool.AppendCertsFromPEM(certificate) {
 		return nil, fmt.Errorf("parse OS_CACERT %q: no PEM certificates", caCertPath)
 	}
