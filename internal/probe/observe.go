@@ -11,7 +11,15 @@ import (
 	"pathfinder/internal/topology"
 )
 
-var ipv4IDPattern = regexp.MustCompile(`\bid\s+([0-9]+)\b`)
+var (
+	ipv4IDPattern   = regexp.MustCompile(`\bid\s+([0-9]+)\b`)
+	icmpEchoPattern = regexp.MustCompile(
+		`(?i)\bICMP echo (?:request|reply), id ([0-9]+), seq ([0-9]+)\b`,
+	)
+	tcpSequencePattern = regexp.MustCompile(
+		`(?i)\bFlags \[[^]]+\].*\bseq ([0-9]+)(?::[0-9]+)?\b`,
+	)
+)
 
 const observationCaptureLimit = 64
 
@@ -101,7 +109,8 @@ func Observe(
 		RequestFilter:              spec.requestFilter,
 		ReplyFilter:                spec.replyFilter,
 		DetectionDescription: "existing traffic is correlated by " +
-			"BPF filters and the IPv4 identification field",
+			"BPF filters, the IPv4 identification field, and ICMP/TCP " +
+			"packet markers when available",
 	}
 
 	sourceObservation, err := awaitCapture(ctx, sourceRequest)
@@ -231,35 +240,41 @@ func capturesCorrelate(first string, second string) bool {
 }
 
 func correlatedMarker(first string, second string) string {
-	firstIDs := captureIDs(first)
-	if len(firstIDs) == 0 {
+	firstMarkers := captureMarkers(first)
+	if len(firstMarkers) == 0 {
 		return ""
 	}
-	for identifier := range captureIDs(second) {
-		if _, found := firstIDs[identifier]; found {
-			return "ipv4-id:" + identifier
+	for marker := range captureMarkers(second) {
+		if _, found := firstMarkers[marker]; found {
+			return marker
 		}
 	}
 	return ""
 }
 
-func captureIDs(output string) map[string]struct{} {
+func captureMarkers(output string) map[string]struct{} {
 	result := make(map[string]struct{})
-	for _, matches := range ipv4IDPattern.FindAllStringSubmatch(
-		output,
-		-1,
-	) {
-		if len(matches) == 2 {
-			result[matches[1]] = struct{}{}
+	for line := range strings.SplitSeq(output, "\n") {
+		ipv4 := ipv4IDPattern.FindStringSubmatch(line)
+		if len(ipv4) != 2 {
+			continue
 		}
+		marker := "ipv4-id:" + ipv4[1]
+		if icmp := icmpEchoPattern.FindStringSubmatch(line); len(icmp) == 3 {
+			marker += ",icmp-id:" + icmp[1] + ",icmp-seq:" + icmp[2]
+		} else if tcp := tcpSequencePattern.FindStringSubmatch(
+			line,
+		); len(tcp) == 2 {
+			marker += ",tcp-seq:" + tcp[1]
+		}
+		result[marker] = struct{}{}
 	}
 	return result
 }
 
 func captureMarker(output string) string {
-	matches := ipv4IDPattern.FindStringSubmatch(output)
-	if len(matches) != 2 {
-		return ""
+	for marker := range captureMarkers(output) {
+		return marker
 	}
-	return "ipv4-id:" + matches[1]
+	return ""
 }

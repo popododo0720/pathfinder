@@ -112,6 +112,36 @@ func TestCapturesCorrelateAcrossPacketWindows(t *testing.T) {
 	}
 }
 
+func TestCapturesRejectSameIPv4IDWithDifferentICMPMarkers(t *testing.T) {
+	t.Parallel()
+
+	first := "IP (id 42, proto ICMP), ICMP echo request, id 100, seq 7"
+	second := "IP (id 42, proto ICMP), ICMP echo request, id 101, seq 7"
+	if capturesCorrelate(first, second) {
+		t.Fatal("different ICMP echo identifiers correlated")
+	}
+}
+
+func TestCapturesCorrelateFullICMPMarker(t *testing.T) {
+	t.Parallel()
+
+	capture := "IP (id 42, proto ICMP), ICMP echo request, id 100, seq 7"
+	want := "ipv4-id:42,icmp-id:100,icmp-seq:7"
+	if marker := correlatedMarker(capture, capture); marker != want {
+		t.Fatalf("correlatedMarker = %q, want %q", marker, want)
+	}
+}
+
+func TestCapturesRejectSameIPv4IDWithDifferentTCPSequence(t *testing.T) {
+	t.Parallel()
+
+	first := "IP (id 42, proto TCP), Flags [S], seq 1000, win 64240"
+	second := "IP (id 42, proto TCP), Flags [S], seq 2000, win 64240"
+	if capturesCorrelate(first, second) {
+		t.Fatal("different TCP sequences correlated")
+	}
+}
+
 func TestCapturesWithoutIPv4IDDoNotCorrelate(t *testing.T) {
 	t.Parallel()
 
