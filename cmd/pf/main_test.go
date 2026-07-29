@@ -38,6 +38,19 @@ func TestRootCommandUsesPlanFlagInsteadOfModeSubcommands(t *testing.T) {
 	}
 }
 
+func TestRootCommandHasDoctorSubcommand(t *testing.T) {
+	t.Parallel()
+
+	root := newRootCommand()
+	found, args, err := root.Find([]string{"doctor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Name() != "doctor" || len(args) != 0 {
+		t.Fatalf("doctor command = %q, args=%v", found.Name(), args)
+	}
+}
+
 func TestAnalysisFlagsDefaultToLiveOVSProbe(t *testing.T) {
 	t.Parallel()
 

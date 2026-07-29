@@ -26,10 +26,14 @@ func newRootCommand() *cobra.Command {
 			return flags.validate()
 		},
 		RunE: func(command *cobra.Command, args []string) error {
+			if flags.output == "text" || flags.output == "json" {
+				return runOutput(command, args, flags)
+			}
 			return runTUI(command, args, flags)
 		},
 	}
 
 	flags.addTo(rootCommand)
+	rootCommand.AddCommand(newDoctorCommand())
 	return rootCommand
 }

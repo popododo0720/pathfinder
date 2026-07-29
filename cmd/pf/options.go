@@ -17,6 +17,7 @@ type analysisFlags struct {
 	minimal           bool
 	planOnly          bool
 	observe           bool
+	output            string
 	probeTimeout      time.Duration
 	observeTimeout    time.Duration
 	timeout           time.Duration
@@ -58,6 +59,12 @@ func (flags *analysisFlags) addTo(command *cobra.Command) {
 		false,
 		"observe matching existing traffic without injecting a packet",
 	)
+	command.Flags().StringVar(
+		&flags.output,
+		"output",
+		"tui",
+		"output format: tui, text, or json",
+	)
 	command.Flags().DurationVar(
 		&flags.probeTimeout,
 		"probe-timeout",
@@ -70,6 +77,28 @@ func (flags *analysisFlags) addTo(command *cobra.Command) {
 		10*time.Second,
 		"maximum time to wait for matching existing traffic",
 	)
+	flags.addInfrastructureTo(command)
+}
+
+func (flags *analysisFlags) addInfrastructureTo(command *cobra.Command) {
+	flags.addDoctorInfrastructureTo(command)
+	command.Flags().BoolVar(
+		&flags.enableOVS,
+		"ovs",
+		true,
+		"inspect OVS and support live/observe modes",
+	)
+	command.Flags().StringVar(
+		&flags.integrationBridge,
+		"integration-bridge",
+		environmentOrDefault("PF_INTEGRATION_BRIDGE", "br-int"),
+		"OVS integration bridge",
+	)
+}
+
+func (flags *analysisFlags) addDoctorInfrastructureTo(
+	command *cobra.Command,
+) {
 	command.Flags().DurationVar(
 		&flags.timeout,
 		"timeout",
@@ -118,12 +147,6 @@ func (flags *analysisFlags) addTo(command *cobra.Command) {
 		environmentOrDefault("PF_OVN_CONTAINER", "ovn_northd"),
 		"container containing OVN command-line tools",
 	)
-	command.Flags().BoolVar(
-		&flags.enableOVS,
-		"ovs",
-		true,
-		"inspect OVS and support live/observe modes",
-	)
 	command.Flags().StringArrayVar(
 		&flags.hostMappings,
 		"host-map",
@@ -138,12 +161,6 @@ func (flags *analysisFlags) addTo(command *cobra.Command) {
 			"openvswitch_vswitchd",
 		),
 		"container containing OVS command-line tools",
-	)
-	command.Flags().StringVar(
-		&flags.integrationBridge,
-		"integration-bridge",
-		environmentOrDefault("PF_INTEGRATION_BRIDGE", "br-int"),
-		"OVS integration bridge",
 	)
 }
 
@@ -196,6 +213,14 @@ func (flags *analysisFlags) validate() error {
 	}
 	if !flags.planOnly && !flags.enableOVS {
 		return fmt.Errorf("live mode requires --ovs; use --plan with --ovs=false")
+	}
+	switch flags.output {
+	case "", "tui", "text", "json":
+	default:
+		return fmt.Errorf(
+			"invalid --output %q: expected tui, text, or json",
+			flags.output,
+		)
 	}
 	return validateConnectionStates(flags.connectionStates)
 }
