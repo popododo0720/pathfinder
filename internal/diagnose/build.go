@@ -501,9 +501,21 @@ func observedOVNEndpoint(
 }
 
 func routeStatus(path topology.NeutronPath) (Status, string, string) {
-	if path.Source.Endpoint.SameNetwork(path.Destination.Endpoint) {
+	sourceIP, destinationIP := compatibleAddresses(
+		path.Source.Endpoint.FixedIPs,
+		path.Destination.Endpoint.FixedIPs,
+	)
+	if path.Source.Endpoint.SameNetwork(path.Destination.Endpoint) &&
+		sourceIP.IsValid() &&
+		destinationIP.IsValid() &&
+		!topology.RequiresNextHop(
+			path.Source,
+			path.Destination,
+			sourceIP,
+			destinationIP,
+		) {
 		return StatusPass,
-			"same Neutron network",
+			"same Neutron subnet",
 			path.Source.Network.Name
 	}
 

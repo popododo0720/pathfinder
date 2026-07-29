@@ -24,6 +24,56 @@ func TestBuildSameNetworkPasses(t *testing.T) {
 	}
 }
 
+func TestBuildSameNetworkDifferentSubnetsRequiresRoute(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	path.Destination.Endpoint.FixedIPs[0].SubnetID = "other-subnet"
+	path.Destination.Subnets[0].ID = "other-subnet"
+
+	result := Build(Input{
+		Neutron:   path,
+		Microflow: "icmp",
+	})
+	if result.Verdict != StatusFail {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+	if !hasFinding(result, "transport", StatusFail) {
+		t.Fatalf("missing route failure: %v", result.Findings)
+	}
+}
+
+func TestBuildSameNetworkDifferentSubnetsUsesRouter(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	path.Destination.Endpoint.FixedIPs[0].SubnetID = "other-subnet"
+	path.Destination.Subnets[0].ID = "other-subnet"
+	path.Routers = []topology.Router{{
+		ID:               "router",
+		Name:             "router",
+		Status:           "ACTIVE",
+		AdminStateUp:     true,
+		InterfaceSubnets: []string{"network-subnet", "other-subnet"},
+	}}
+
+	result := Build(Input{
+		Neutron:   path,
+		Microflow: "icmp",
+	})
+	if result.Verdict != StatusPass {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+}
+
 func TestBuildExternalNetworksWarnsAboutVisibilityBoundary(
 	t *testing.T,
 ) {
