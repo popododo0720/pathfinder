@@ -18,7 +18,8 @@ Pathfinder correlates:
 - Exact live destination-tap verification and two-stage reply-path checks
 - Source/destination tap correlation for pre-existing traffic in observe mode
 - A compact path graph with PASS, WARN, FAIL, and UNKNOWN findings
-- An interactive TUI for navigating the path, traces, and probe result
+- An interactive TUI with compact OVN/OVS pipeline summaries, raw trace
+  fallback, and a probe verification timeline
 - Cause-focused text and JSON output without raw packet-capture payloads
 - A `doctor` command for OpenStack, SSH, Kolla, OVN, OVS, and `tcpdump`
   prerequisites
@@ -181,6 +182,14 @@ There are no `plan` or `tui` subcommands. The TUI is the default output:
 - `--plan`: simulate without sending
 - `--observe`: correlate existing traffic without sending
 
+The OVN and OVS tabs open in summary mode. OVN stages use the official
+`ovn-trace --summary` output when available, while the detailed trace remains
+available through `v`. The Probe tab shows packet injection, destination
+delivery, reply generation, and return delivery as separate stages. Its
+detailed view includes filters and correlation metadata but never packet
+capture payloads. A trace `FORWARD ACTION` means the simulation selected a
+forwarding action; only Probe can prove actual destination delivery.
+
 For scripts or a non-interactive terminal, select a cause-focused output:
 
 ```sh
@@ -201,6 +210,11 @@ Keyboard controls:
 | `h`, `l`, `Tab`, arrows | Switch tabs |
 | `j`, `k`, arrows | Select a path hop or scroll a trace |
 | `g`, `G` | Move to the top or bottom |
+| `v` | Toggle summary/raw trace or Probe summary/details |
+| `e` | Expand or collapse all OVN/OVS summary stages |
+| `H`, `L` | Scroll long trace lines horizontally |
+| `/` | Search the current trace or Probe view |
+| `n`, `N` | Move to the next or previous search match |
 | `r` | Run the analysis again |
 | `q`, `Ctrl-C` | Quit |
 
