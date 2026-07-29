@@ -3,8 +3,12 @@ package cloud
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gophercloud/gophercloud/v2"
 )
 
 const testServerID = "11111111-1111-1111-1111-111111111111"
@@ -311,6 +315,119 @@ func TestEndpointSelectorPreservesSelectedIPOnMultiAddressPort(
 				resolved,
 			)
 		}
+	}
+}
+
+func TestEndpointSelectorAllowsAtSignInVMName(t *testing.T) {
+	t.Parallel()
+
+	backend := &fakeSelectorBackend{
+		ports: []selectorPort{{
+			ID:          testPortID,
+			DeviceID:    testServerID,
+			DeviceOwner: "compute:nova",
+			FixedIPs:    []string{"192.0.2.10"},
+		}},
+		servers: []selectorServer{{
+			ID:   testServerID,
+			Name: "api@blue",
+		}},
+	}
+	resolver := newEndpointSelectorResolver(backend)
+	resolved, err := resolver.Resolve(
+		context.Background(),
+		"vm:api@blue@192.0.2.10",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.PortID != testPortID ||
+		resolved.IPAddress != "192.0.2.10" {
+		t.Fatalf("resolved = %+v", resolved)
+	}
+	if len(backend.serverCalls) != 1 ||
+		backend.serverCalls[0] != "api@blue" {
+		t.Fatalf("server calls = %v", backend.serverCalls)
+	}
+}
+
+func TestSelectorBackendListsAllTenantsWhenAuthorized(t *testing.T) {
+	t.Parallel()
+
+	var allTenants string
+	server := httptest.NewServer(http.HandlerFunc(
+		func(writer http.ResponseWriter, request *http.Request) {
+			allTenants = request.URL.Query().Get("all_tenants")
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(
+				`{"servers":[{"id":"` + testServerID +
+					`","name":"api"}]}`,
+			))
+		},
+	))
+	defer server.Close()
+
+	backend := selectorBackendForComputeEndpoint(server)
+	values, err := backend.ListServers(context.Background(), "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allTenants != "true" {
+		t.Fatalf("all_tenants = %q, want true", allTenants)
+	}
+	if len(values) != 1 || values[0].ID != testServerID {
+		t.Fatalf("servers = %+v", values)
+	}
+}
+
+func TestSelectorBackendFallsBackForNonAdmin(t *testing.T) {
+	t.Parallel()
+
+	var queries []string
+	server := httptest.NewServer(http.HandlerFunc(
+		func(writer http.ResponseWriter, request *http.Request) {
+			allTenants := request.URL.Query().Get("all_tenants")
+			queries = append(queries, allTenants)
+			writer.Header().Set("Content-Type", "application/json")
+			if allTenants == "true" {
+				writer.WriteHeader(http.StatusForbidden)
+				_, _ = writer.Write([]byte(
+					`{"forbidden":{"message":"policy denied"}}`,
+				))
+				return
+			}
+			_, _ = writer.Write([]byte(
+				`{"servers":[{"id":"` + testServerID +
+					`","name":"api"}]}`,
+			))
+		},
+	))
+	defer server.Close()
+
+	backend := selectorBackendForComputeEndpoint(server)
+	values, err := backend.ListServers(context.Background(), "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queries) != 2 || queries[0] != "true" || queries[1] != "" {
+		t.Fatalf("all_tenants queries = %v", queries)
+	}
+	if len(values) != 1 || values[0].ID != testServerID {
+		t.Fatalf("servers = %+v", values)
+	}
+}
+
+func selectorBackendForComputeEndpoint(
+	server *httptest.Server,
+) *gophercloudSelectorBackend {
+	provider := &gophercloud.ProviderClient{
+		HTTPClient: *server.Client(),
+	}
+	return &gophercloudSelectorBackend{
+		computeClient: &gophercloud.ServiceClient{
+			ProviderClient: provider,
+			Endpoint:       server.URL + "/",
+		},
 	}
 }
 

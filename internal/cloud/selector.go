@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/netip"
 	"sort"
 	"strings"
@@ -284,20 +285,22 @@ func parseVMTarget(
 ) (string, string, error) {
 	target := value
 	address := ""
-	if before, after, found := strings.Cut(value, "@"); found {
-		if before == "" || after == "" || strings.Contains(after, "@") {
-			return "", "", invalidSelector(selector)
-		}
-		parsed, err := netip.ParseAddr(after)
-		if err != nil {
+	if separator := strings.LastIndexByte(value, '@'); separator >= 0 {
+		before, after := value[:separator], value[separator+1:]
+		parsed, parseErr := netip.ParseAddr(after)
+		if parseErr == nil {
+			if before == "" {
+				return "", "", invalidSelector(selector)
+			}
+			target = before
+			address = parsed.String()
+		} else if requireUUID {
 			return "", "", fmt.Errorf(
 				"invalid VM interface IP in selector %q: %w",
 				selector,
-				err,
+				parseErr,
 			)
 		}
-		target = before
-		address = parsed.String()
 	}
 	if target == "" || requireUUID && !isUUID(target) {
 		return "", "", invalidSelector(selector)
@@ -535,10 +538,12 @@ func (backend *gophercloudSelectorBackend) ListServers(
 	if err != nil {
 		return nil, err
 	}
-	pages, err := servers.List(
-		client,
-		servers.ListOpts{Name: name},
-	).AllPages(ctx)
+	listOptions := servers.ListOpts{Name: name, AllTenants: true}
+	pages, err := servers.List(client, listOptions).AllPages(ctx)
+	if gophercloud.ResponseCodeIs(err, http.StatusForbidden) {
+		listOptions.AllTenants = false
+		pages, err = servers.List(client, listOptions).AllPages(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
