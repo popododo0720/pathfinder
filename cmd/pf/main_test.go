@@ -1,6 +1,7 @@
 package main
 
 import (
+	"reflect"
 	"testing"
 
 	"pathfinder/internal/engine"
@@ -109,6 +110,21 @@ func TestAnalysisFlagsAllowPlanModeWithoutOVS(t *testing.T) {
 	flags := &analysisFlags{planOnly: true}
 	if err := flags.validate(); err != nil {
 		t.Fatalf("plan mode rejected --ovs=false: %v", err)
+	}
+}
+
+func TestEnvironmentListParsesHostMappings(t *testing.T) {
+	t.Parallel()
+
+	got := parseEnvironmentList(
+		"stack1=192.0.2.11, stack2=192.0.2.12",
+	)
+	want := []string{
+		"stack1=192.0.2.11",
+		"stack2=192.0.2.12",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("environmentList() = %v, want %v", got, want)
 	}
 }
 

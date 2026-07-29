@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"pathfinder/internal/engine"
@@ -150,7 +151,7 @@ func (flags *analysisFlags) addDoctorInfrastructureTo(
 	command.Flags().StringArrayVar(
 		&flags.hostMappings,
 		"host-map",
-		nil,
+		environmentList("PF_HOST_MAP"),
 		"map a Neutron host to an SSH address (NAME=ADDRESS)",
 	)
 	command.Flags().StringVar(
@@ -239,4 +240,22 @@ func environmentOrDefault(name string, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func environmentList(name string) []string {
+	return parseEnvironmentList(os.Getenv(name))
+}
+
+func parseEnvironmentList(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	values := make([]string, 0)
+	for value := range strings.SplitSeq(raw, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
