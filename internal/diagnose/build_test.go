@@ -365,13 +365,14 @@ func TestBuildPassesCorrelatedObservedTraffic(t *testing.T) {
 
 	path := testNeutronPath("network", "network")
 	probe := topology.ProbeResult{
-		Mode:           "observe",
-		Protocol:       "icmp",
-		SourceIP:       "10.0.0.10",
-		DestinationIP:  "10.0.0.20",
-		SourceObserved: true,
-		Delivered:      true,
-		Marker:         "ipv4-id:42",
+		Mode:                       "observe",
+		Protocol:                   "icmp",
+		SourceIP:                   "10.0.0.10",
+		DestinationIP:              "10.0.0.20",
+		SourceObservationAttempted: true,
+		SourceObserved:             true,
+		Delivered:                  true,
+		Marker:                     "ipv4-id:42",
 	}
 	result := Build(Input{
 		Neutron:        path,
@@ -402,13 +403,14 @@ func TestBuildObserveProbeVerifiesExternalPhysicalPath(t *testing.T) {
 	path.Destination.Network.PhysicalNetwork = "external"
 	path.Destination.Network.SegmentationID = "55"
 	probe := topology.ProbeResult{
-		Mode:           "observe",
-		Protocol:       "icmp",
-		SourceIP:       "192.168.0.78",
-		DestinationIP:  "192.168.55.148",
-		SourceObserved: true,
-		Delivered:      true,
-		Marker:         "ipv4-id:42",
+		Mode:                       "observe",
+		Protocol:                   "icmp",
+		SourceIP:                   "192.168.0.78",
+		DestinationIP:              "192.168.55.148",
+		SourceObservationAttempted: true,
+		SourceObserved:             true,
+		Delivered:                  true,
+		Marker:                     "ipv4-id:42",
 	}
 	result := Build(Input{
 		Neutron:        path,

@@ -67,7 +67,8 @@ func TestObserveCorrelatesExistingTrafficWithoutInjection(t *testing.T) {
 	if result.Injected {
 		t.Fatal("observe mode injected a packet")
 	}
-	if !result.SourceObserved || !result.Delivered ||
+	if !result.SourceObservationAttempted ||
+		!result.SourceObserved || !result.Delivered ||
 		!result.ReplyGenerated || !result.ReplyObserved {
 		t.Fatalf("observe result = %+v", result)
 	}

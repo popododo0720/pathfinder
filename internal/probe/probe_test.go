@@ -74,6 +74,12 @@ func TestRunInjectsAndDetectsDelivery(t *testing.T) {
 	if !result.Injected || !result.Delivered {
 		t.Fatalf("probe result = %+v", result)
 	}
+	if result.SourceObservationAttempted || result.SourceObserved {
+		t.Fatalf(
+			"live packet-out was reported as a source tap observation: %+v",
+			result,
+		)
+	}
 	if result.Method !=
 		"ovs-ofctl packet-out + exact tap packet capture" {
 		t.Fatalf("Method = %q", result.Method)
@@ -85,12 +91,32 @@ func TestRunInjectsAndDetectsDelivery(t *testing.T) {
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
 	foundPacketOut := false
+	foundFullCaptureWindow := false
 	for _, command := range runner.commands {
 		if strings.Contains(command, "ovs-ofctl packet-out") {
 			foundPacketOut = true
 		}
+		if strings.Contains(command, "tcpdump") &&
+			strings.Contains(command, "1.25s") {
+			foundFullCaptureWindow = true
+		}
 	}
 	if !foundPacketOut {
 		t.Fatalf("packet-out command was not executed: %v", runner.commands)
+	}
+	if !foundFullCaptureWindow {
+		t.Fatalf(
+			"capture timeout did not include warmup: %v",
+			runner.commands,
+		)
+	}
+}
+
+func TestCaptureTimeoutPreservesPostWarmupObservationWindow(t *testing.T) {
+	t.Parallel()
+
+	if got := captureTimeoutAfterWarmup(2 * time.Second); got !=
+		2*time.Second+captureWarmup {
+		t.Fatalf("capture timeout = %s", got)
 	}
 }

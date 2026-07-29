@@ -31,6 +31,7 @@ func Run(
 	if deliveryTimeout <= 0 {
 		deliveryTimeout = defaultDeliveryTimeout
 	}
+	captureTimeout := captureTimeoutAfterWarmup(deliveryTimeout)
 	if err := ValidatePath(neutronPath); err != nil {
 		return topology.ProbeResult{}, err
 	}
@@ -87,8 +88,9 @@ func Run(
 		ReplyExpected:    packet.ReplyExpected(),
 		RequestFilter:    packet.RequestFilter(),
 		ReplyFilter:      packet.ReplyFilter(),
-		DetectionDescription: "delivery requires an exact BPF match " +
-			"for the generated packet on the destination tap",
+		DetectionDescription: "packet-out acceptance proves injection into " +
+			"source OVS; source tap capture is not attempted; delivery " +
+			"requires an exact BPF match on the destination tap",
 	}
 
 	captureContext, cancelCaptures := context.WithCancel(ctx)
@@ -98,7 +100,7 @@ func Run(
 		destinationClient,
 		ovsPath.Destination.Interface,
 		result.RequestFilter,
-		deliveryTimeout,
+		captureTimeout,
 	)
 	var replyCapture <-chan captureOutcome
 	var replyGeneratedCapture <-chan captureOutcome
@@ -108,14 +110,14 @@ func Run(
 			sourceClient,
 			ovsPath.Source.Interface,
 			result.ReplyFilter,
-			deliveryTimeout,
+			captureTimeout,
 		)
 		replyGeneratedCapture = startCapture(
 			captureContext,
 			destinationClient,
 			ovsPath.Destination.Interface,
 			result.ReplyFilter,
-			deliveryTimeout,
+			captureTimeout,
 		)
 	}
 	warmup := time.NewTimer(captureWarmup)
@@ -134,7 +136,6 @@ func Run(
 		return result, fmt.Errorf("inject packet: %w", err)
 	}
 	result.Injected = true
-	result.SourceObserved = true
 
 	request, err := awaitCapture(ctx, requestCapture)
 	if err != nil {
@@ -182,6 +183,13 @@ func Run(
 	}
 	result.Duration = time.Since(started)
 	return result, nil
+}
+
+func captureTimeoutAfterWarmup(observationTimeout time.Duration) time.Duration {
+	if observationTimeout <= 0 {
+		observationTimeout = defaultDeliveryTimeout
+	}
+	return observationTimeout + captureWarmup
 }
 
 func startCapture(

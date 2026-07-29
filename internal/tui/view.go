@@ -430,8 +430,15 @@ func (model Model) probeContent() string {
 			probe.NextHopMACSource,
 		)
 	}
+	sourceObservation := "not attempted (packet-out enters source OVS directly)"
+	if probe.SourceObservationAttempted {
+		sourceObservation = "no matching packet observed"
+		if probe.SourceObserved {
+			sourceObservation = "matching packet observed"
+		}
+	}
 	return fmt.Sprintf(
-		"%s: %s\n\nMethod: %s\nMarker: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nNext hop: %s\nInjected: %t\nSource observed: %t\nExact destination capture: %t\nReply: %s\nDuration: %s\n\nRequest filter:\n%s\n\nReply filter:\n%s\n\n%s",
+		"%s: %s\n\nMethod: %s\nMarker: %s\nProtocol: %s\nSource: %s:%d (%s)\nDestination: %s:%d (%s)\nNext hop: %s\nInjected: %t\nSource tap: %s\nExact destination capture: %t\nReply: %s\nDuration: %s\n\nRequest filter:\n%s\n\nReply filter:\n%s\n\n%s",
 		mode,
 		status,
 		probe.Method,
@@ -445,7 +452,7 @@ func (model Model) probeContent() string {
 		probe.DestinationMAC,
 		nextHop,
 		probe.Injected,
-		probe.SourceObserved,
+		sourceObservation,
 		probe.Delivered,
 		reply,
 		shortDuration(probe.Duration),

@@ -69,6 +69,15 @@ func TestModelSwitchesToTraceTabs(t *testing.T) {
 	if !strings.Contains(model.View(), "LIVE: DELIVERED") {
 		t.Fatalf("probe result is missing:\n%s", model.View())
 	}
+	if !strings.Contains(
+		model.View(),
+		"Source tap: not attempted (packet-out enters source OVS directly)",
+	) {
+		t.Fatalf("live source evidence is misleading:\n%s", model.View())
+	}
+	if strings.Contains(model.View(), "RAW_CAPTURE_MUST_NOT_RENDER") {
+		t.Fatalf("raw capture was rendered:\n%s", model.View())
+	}
 }
 
 func TestPlanModeShowsThatNoPacketWasInjected(t *testing.T) {
@@ -104,6 +113,8 @@ func TestObserveModeShowsObservedTraffic(t *testing.T) {
 	result := testResult()
 	result.Probe.Mode = "observe"
 	result.Probe.Injected = false
+	result.Probe.SourceObservationAttempted = true
+	result.Probe.SourceObserved = true
 	model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	model.Update(analysisFinishedMsg{
 		generation: model.generation,
@@ -113,7 +124,7 @@ func TestObserveModeShowsObservedTraffic(t *testing.T) {
 
 	view := model.View()
 	if !strings.Contains(view, "OBSERVE") ||
-		!strings.Contains(view, "Source observed: true") {
+		!strings.Contains(view, "Source tap: matching packet observed") {
 		t.Fatalf("observe mode is not clear:\n%s", view)
 	}
 }
@@ -234,13 +245,13 @@ func testResult() engine.Result {
 			SourceMAC:            "fa:16:3e:00:00:01",
 			DestinationMAC:       "fa:16:3e:00:00:02",
 			Injected:             true,
-			SourceObserved:       true,
 			Delivered:            true,
 			ReplyExpected:        true,
 			ReplyGenerated:       true,
 			ReplyObserved:        true,
 			Marker:               "tcp:45000->443",
 			RequestFilter:        "tcp dst port 443",
+			RequestCapture:       "RAW_CAPTURE_MUST_NOT_RENDER",
 			ReplyFilter:          "tcp src port 443",
 			Duration:             100 * time.Millisecond,
 			DetectionDescription: "exact packet capture",

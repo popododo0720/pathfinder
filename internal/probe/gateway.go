@@ -63,7 +63,7 @@ func ResolveNextHop(
 		sourceClient,
 		ovsPath.Source.Interface,
 		filter,
-		timeout,
+		captureTimeoutAfterWarmup(timeout),
 	)
 	if err := waitCaptureWarmup(ctx); err != nil {
 		return NextHop{}, err

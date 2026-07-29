@@ -87,18 +87,19 @@ func Observe(
 	}
 
 	result := topology.ProbeResult{
-		Method:          "correlated source/destination tap packet capture",
-		Mode:            "observe",
-		Protocol:        spec.protocol,
-		SourceIP:        spec.sourceIP,
-		DestinationIP:   spec.destinationIP,
-		SourcePort:      spec.sourcePort,
-		DestinationPort: spec.destinationPort,
-		SourceMAC:       neutronPath.Source.Endpoint.MACAddress,
-		DestinationMAC:  neutronPath.Destination.Endpoint.MACAddress,
-		ReplyExpected:   spec.replyExpected,
-		RequestFilter:   spec.requestFilter,
-		ReplyFilter:     spec.replyFilter,
+		Method:                     "correlated source/destination tap packet capture",
+		Mode:                       "observe",
+		Protocol:                   spec.protocol,
+		SourceIP:                   spec.sourceIP,
+		DestinationIP:              spec.destinationIP,
+		SourcePort:                 spec.sourcePort,
+		DestinationPort:            spec.destinationPort,
+		SourceMAC:                  neutronPath.Source.Endpoint.MACAddress,
+		DestinationMAC:             neutronPath.Destination.Endpoint.MACAddress,
+		SourceObservationAttempted: true,
+		ReplyExpected:              spec.replyExpected,
+		RequestFilter:              spec.requestFilter,
+		ReplyFilter:                spec.replyFilter,
 		DetectionDescription: "existing traffic is correlated by " +
 			"BPF filters and the IPv4 identification field",
 	}

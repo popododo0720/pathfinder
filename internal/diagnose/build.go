@@ -80,6 +80,7 @@ func Build(input Input) Report {
 		input.Probe != nil &&
 		(input.Probe.Injected ||
 			(input.Probe.Mode == "observe" &&
+				input.Probe.SourceObservationAttempted &&
 				input.Probe.SourceObserved)) &&
 		input.Probe.Delivered {
 		routeStatus = StatusPass
@@ -234,9 +235,15 @@ func observedProbe(
 	if probe == nil {
 		return StatusUnknown, "live probe did not return a result"
 	}
-	if probe.Mode == "observe" && !probe.SourceObserved {
-		return StatusFail,
-			"no matching traffic was observed on the source tap"
+	if probe.Mode == "observe" {
+		if !probe.SourceObservationAttempted {
+			return StatusUnknown,
+				"source tap observation was not attempted"
+		}
+		if !probe.SourceObserved {
+			return StatusFail,
+				"no matching traffic was observed on the source tap"
+		}
 	}
 	if probe.Mode != "observe" && !probe.Injected {
 		return StatusFail, "packet was not injected"
@@ -248,8 +255,9 @@ func observedProbe(
 					"correlated at the destination"
 		}
 		return StatusFail,
-			"packet injected but its exact marker was not observed " +
-				"on the destination tap"
+			"packet-out was accepted by source OVS, but its exact marker " +
+				"was not observed on the destination tap; source tap " +
+				"capture is not part of live mode"
 	}
 	if probe.Mode == "observe" {
 		return StatusPass, fmt.Sprintf(
@@ -261,7 +269,8 @@ func observedProbe(
 		)
 	}
 	return StatusPass, fmt.Sprintf(
-		"%s %s:%d -> %s:%d delivered; exact marker=%s",
+		"%s %s:%d -> %s:%d delivered after source OVS packet-out; "+
+			"source tap capture not attempted; exact marker=%s",
 		probe.Protocol,
 		probe.SourceIP,
 		probe.SourcePort,
