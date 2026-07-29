@@ -155,6 +155,34 @@ func TestTraceSummaryExpandsAndRawViewScrollsHorizontally(
 	}
 }
 
+func TestTraceSummaryLinesFitNarrowViewport(t *testing.T) {
+	t.Parallel()
+
+	model := testModel()
+	result := testResult()
+	result.OVS.Trace = `bridge("br-int")
+ 0. priority 100
+    output:123456789012345678901234567890123456789012345678901234567890
+Datapath actions: clone(output:123456789012345678901234567890),12345678901234567890`
+	model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	model.Update(analysisFinishedMsg{
+		generation: model.generation,
+		result:     result,
+	})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+
+	for _, line := range strings.Split(model.traceContent(), "\n") {
+		if width := lipgloss.Width(line); width > model.viewport.Width {
+			t.Fatalf(
+				"summary line width = %d, viewport = %d:\n%s",
+				width,
+				model.viewport.Width,
+				line,
+			)
+		}
+	}
+}
+
 func TestNewAnalysisResetsTraceViewMode(t *testing.T) {
 	t.Parallel()
 

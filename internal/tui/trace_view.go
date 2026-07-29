@@ -77,6 +77,7 @@ func (model Model) ovnTraceContent() string {
 		&output,
 		summary,
 		"OVN trace is a logical simulation; Probe proves actual delivery.",
+		model.traceTextWidth(),
 	)
 	return output.String()
 }
@@ -145,6 +146,7 @@ func (model Model) ovsTraceContent() string {
 		&output,
 		summary,
 		"OVS output is a simulated source-host action; Probe proves destination delivery.",
+		model.traceTextWidth(),
 	)
 	return output.String()
 }
@@ -252,6 +254,7 @@ func writeTraceOutcome(
 	output *strings.Builder,
 	summary traceSummary,
 	note string,
+	width int,
 ) {
 	output.WriteString("\n")
 	output.WriteString(titleStyle.Render("RESULT"))
@@ -261,7 +264,7 @@ func writeTraceOutcome(
 	))
 	if summary.Outcome != "" {
 		output.WriteString("\n")
-		output.WriteString(compactTraceText(summary.Outcome, 140))
+		output.WriteString(compactTraceText(summary.Outcome, width))
 	}
 	if summary.FailureCause != "" {
 		output.WriteString("\n")
@@ -271,10 +274,15 @@ func writeTraceOutcome(
 		output.WriteString(summary.FailureCause)
 	}
 	output.WriteString("\n\n")
-	output.WriteString(subtitleStyle.Render(note))
+	output.WriteString(subtitleStyle.Render(
+		compactTraceText(note, width),
+	))
 	output.WriteString("\n")
 	output.WriteString(subtitleStyle.Render(
-		"v: raw trace  •  e: expand/collapse",
+		compactTraceText(
+			"v: raw trace  •  e: expand/collapse",
+			width,
+		),
 	))
 }
 

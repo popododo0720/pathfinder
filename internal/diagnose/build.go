@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"pathfinder/internal/ovs"
 	"pathfinder/internal/topology"
 )
 
@@ -833,7 +834,7 @@ func (builder *reportBuilder) addTraceFindings(input Input) {
 		}
 	}
 	if input.OVS != nil {
-		actions := lastDatapathActions(input.OVS.Trace)
+		actions := ovs.LastDatapathActions(input.OVS.Trace)
 		switch {
 		case actions == "":
 			builder.addPlanTraceFinding(
@@ -842,7 +843,8 @@ func (builder *reportBuilder) addTraceFindings(input Input) {
 				StatusUnknown,
 				"ofproto/trace has no Datapath actions line",
 			)
-		case strings.Contains(strings.ToLower(actions), "drop"):
+		case ovs.ClassifyDatapathActions(actions) ==
+			ovs.DatapathOutcomeDrop:
 			builder.addPlanTraceFinding(
 				input,
 				"ovs-trace",
@@ -906,19 +908,6 @@ func ovnTraceHasOutput(trace string) bool {
 	return strings.Contains(trace, "output;") ||
 		strings.Contains(trace, "output to") ||
 		strings.Contains(trace, "output(")
-}
-
-func lastDatapathActions(trace string) string {
-	const marker = "Datapath actions:"
-	index := strings.LastIndex(trace, marker)
-	if index < 0 {
-		return ""
-	}
-	line := trace[index+len(marker):]
-	if newline := strings.IndexByte(line, '\n'); newline >= 0 {
-		line = line[:newline]
-	}
-	return strings.TrimSpace(line)
 }
 
 func (builder *reportBuilder) addMTUFinding(path topology.NeutronPath) {

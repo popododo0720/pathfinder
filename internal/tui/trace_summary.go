@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"pathfinder/internal/ovs"
 )
 
 type traceOutcome string
@@ -281,9 +283,14 @@ func summarizeOVSTrace(raw string) traceSummary {
 					strings.TrimPrefix(trimmed, "OpenFlow actions="),
 				)
 			}
-		case strings.HasPrefix(trimmed, "Final flow:"),
-			strings.HasPrefix(trimmed, "Megaflow:"),
+		case strings.HasPrefix(trimmed, "Final flow:"):
+			flush()
+		case strings.HasPrefix(trimmed, "Megaflow:"),
+			strings.HasPrefix(trimmed, "Resubmitted flow:"),
+			strings.HasPrefix(trimmed, "Resubmitted regs:"),
+			strings.HasPrefix(trimmed, "Resubmitted megaflow:"),
 			strings.HasPrefix(trimmed, "Resubmitted odp:"),
+			strings.HasPrefix(trimmed, "Relevant fields:"),
 			ignorableTraceLine(line),
 			current == nil:
 			continue
@@ -295,7 +302,10 @@ func summarizeOVSTrace(raw string) traceSummary {
 		}
 	}
 	flush()
-	summary.OutcomeKind = classifyOVSActions(summary.Outcome)
+	summary.Outcome = ovs.LastDatapathActions(raw)
+	summary.OutcomeKind = traceOutcomeFromOVS(
+		ovs.ClassifyDatapathActions(summary.Outcome),
+	)
 	if summary.OutcomeKind == traceOutcomeDrop {
 		summary.FailureCause = ovsDropCause(summary.Stages)
 	}
@@ -365,85 +375,21 @@ func ovnDropCause(stage traceStage) string {
 	return label + " executed drop"
 }
 
-func classifyOVSActions(actions string) traceOutcome {
-	actions = strings.TrimSpace(strings.ToLower(actions))
-	if actions == "" {
-		return traceOutcomeUnknown
-	}
-	hasDrop := false
-	hasForward := false
-	hasRecirculation := false
-	hasUserspace := false
-	for _, action := range splitTopLevelActions(actions) {
-		switch {
-		case action == "drop":
-			hasDrop = true
-		case ovsActionForwards(action):
-			hasForward = true
-		case strings.HasPrefix(action, "recirc("),
-			strings.HasPrefix(action, "ct("):
-			hasRecirculation = true
-		case strings.HasPrefix(action, "userspace("):
-			hasUserspace = true
-		}
-	}
-	switch {
-	case hasDrop && hasForward:
-		return traceOutcomeMixed
-	case hasForward:
-		return traceOutcomeForward
-	case hasDrop:
+func traceOutcomeFromOVS(outcome ovs.DatapathOutcome) traceOutcome {
+	switch outcome {
+	case ovs.DatapathOutcomeDrop:
 		return traceOutcomeDrop
-	case hasRecirculation:
+	case ovs.DatapathOutcomeForward:
+		return traceOutcomeForward
+	case ovs.DatapathOutcomeRecirculate:
 		return traceOutcomeRecirculate
-	case hasUserspace:
+	case ovs.DatapathOutcomeUserspace:
 		return traceOutcomeUserspace
+	case ovs.DatapathOutcomeMixed:
+		return traceOutcomeMixed
 	default:
 		return traceOutcomeUnknown
 	}
-}
-
-func splitTopLevelActions(actions string) []string {
-	var result []string
-	start := 0
-	depth := 0
-	for index, character := range actions {
-		switch character {
-		case '(', '[', '{':
-			depth++
-		case ')', ']', '}':
-			if depth > 0 {
-				depth--
-			}
-		case ',':
-			if depth == 0 {
-				result = append(
-					result,
-					strings.TrimSpace(actions[start:index]),
-				)
-				start = index + 1
-			}
-		}
-	}
-	result = append(result, strings.TrimSpace(actions[start:]))
-	return result
-}
-
-func ovsActionForwards(action string) bool {
-	if action == "" {
-		return false
-	}
-	if strings.HasPrefix(action, "output:") ||
-		strings.HasPrefix(action, "tnl_push(") ||
-		strings.Contains(action, "output:") {
-		return true
-	}
-	for _, character := range action {
-		if character < '0' || character > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func ovsDropCause(stages []traceStage) string {

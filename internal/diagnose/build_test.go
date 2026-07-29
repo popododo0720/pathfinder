@@ -676,6 +676,42 @@ func TestBuildUsesFinalOVSDatapathAction(t *testing.T) {
 	}
 }
 
+func TestBuildDoesNotTreatNestedCloneDropAsTerminalDrop(t *testing.T) {
+	t.Parallel()
+
+	path := testNeutronPath("network", "network")
+	ovsPath := topology.OVSPath{
+		Source: topology.OVSEndpoint{
+			Host:        "stack1",
+			Interface:   "tap-source",
+			OFPort:      1,
+			LinkState:   "up",
+			LogicalPort: "source",
+		},
+		Destination: topology.OVSEndpoint{
+			Host:        "stack2",
+			Interface:   "tap-destination",
+			OFPort:      2,
+			LinkState:   "up",
+			LogicalPort: "destination",
+		},
+		Trace: "Datapath actions: clone(drop),2",
+	}
+	result := Build(Input{
+		Neutron:      path,
+		OVS:          &ovsPath,
+		OVSRequested: true,
+		Microflow:    "tcp.dst == 443",
+	})
+	if result.Verdict != StatusPass {
+		t.Fatalf(
+			"Verdict = %s, findings=%v",
+			result.Verdict,
+			result.Findings,
+		)
+	}
+}
+
 func TestBuildLetsLiveDeliveryOverrideDroppedPlanTrace(t *testing.T) {
 	t.Parallel()
 

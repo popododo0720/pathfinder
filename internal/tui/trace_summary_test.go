@@ -1,6 +1,10 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	"pathfinder/internal/ovs"
+)
 
 func TestSummarizeOVNTraceExtractsLogicalStages(t *testing.T) {
 	t.Parallel()
@@ -191,6 +195,27 @@ Datapath actions: 12`)
 	}
 }
 
+func TestLegacyOVSSummaryIgnoresResubmissionDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	summary := summarizeOVSTrace(`Bridge: br-int
+Rule: table=0 cookie=0 priority=100
+OpenFlow actions=resubmit(,8)
+Resubmitted flow: recirc_id=0,ip,in_port=1
+Resubmitted regs: reg0=0x1
+Resubmitted megaflow: recirc_id=0,ip
+Relevant fields: skb_priority=0
+Final flow: unchanged
+Datapath actions: 12`)
+
+	if len(summary.Stages) != 1 {
+		t.Fatalf("stages = %d, want 1: %#v", len(summary.Stages), summary)
+	}
+	if summary.Stages[0].Action != "resubmit(,8)" {
+		t.Fatalf("action was polluted: %q", summary.Stages[0].Action)
+	}
+}
+
 func TestOVSOutcomeUsesOnlyFinalDatapathActions(t *testing.T) {
 	t.Parallel()
 
@@ -205,28 +230,26 @@ Datapath actions: output:5`)
 	}
 }
 
-func TestClassifyOVSActionOutcomes(t *testing.T) {
+func TestTraceOutcomeMapsOVSActionOutcomes(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]traceOutcome{
-		"drop":                              traceOutcomeDrop,
-		"output:5":                          traceOutcomeForward,
-		"5":                                 traceOutcomeForward,
-		"ct(zone=5),recirc(0x1)":            traceOutcomeRecirculate,
-		"userspace(pid=1)":                  traceOutcomeUserspace,
-		"clone(output:2),drop":              traceOutcomeMixed,
-		"tnl_push(tnl_port(1),out_port(2))": traceOutcomeForward,
-		"":                                  traceOutcomeUnknown,
+	tests := map[ovs.DatapathOutcome]traceOutcome{
+		ovs.DatapathOutcomeDrop:        traceOutcomeDrop,
+		ovs.DatapathOutcomeForward:     traceOutcomeForward,
+		ovs.DatapathOutcomeRecirculate: traceOutcomeRecirculate,
+		ovs.DatapathOutcomeUserspace:   traceOutcomeUserspace,
+		ovs.DatapathOutcomeMixed:       traceOutcomeMixed,
+		ovs.DatapathOutcomeUnknown:     traceOutcomeUnknown,
 	}
-	for actions, expected := range tests {
-		actions := actions
+	for outcome, expected := range tests {
+		outcome := outcome
 		expected := expected
-		t.Run(actions, func(t *testing.T) {
+		t.Run(string(outcome), func(t *testing.T) {
 			t.Parallel()
-			if actual := classifyOVSActions(actions); actual != expected {
+			if actual := traceOutcomeFromOVS(outcome); actual != expected {
 				t.Fatalf(
-					"classifyOVSActions(%q) = %q, want %q",
-					actions,
+					"traceOutcomeFromOVS(%q) = %q, want %q",
+					outcome,
 					actual,
 					expected,
 				)
