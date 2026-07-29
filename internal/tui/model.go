@@ -43,6 +43,8 @@ type Model struct {
 	viewport   viewport.Model
 	tab        tab
 	selected   int
+	rawView    bool
+	expanded   bool
 	width      int
 	height     int
 	loading    bool
@@ -87,6 +89,7 @@ func NewModelWithAnalyzer(
 		started:       time.Now(),
 		generation:    1,
 	}
+	model.viewport.SetHorizontalStep(8)
 	return model
 }
 
@@ -117,6 +120,8 @@ func (model *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.err = message.err
 		model.result = &message.result
 		model.selected = 0
+		model.rawView = false
+		model.expanded = false
 		model.refreshViewport()
 		return model, nil
 
@@ -165,6 +170,8 @@ func (model *Model) handleKey(
 		}
 		model.loading = true
 		model.err = nil
+		model.rawView = false
+		model.expanded = false
 		model.started = time.Now()
 		model.generation++
 		return model, tea.Batch(
@@ -194,6 +201,29 @@ func (model *Model) handleKey(
 	case "4":
 		model.tab = probeTab
 		model.refreshViewport()
+		return model, nil
+	case "v":
+		if model.tab != pathTab {
+			model.rawView = !model.rawView
+			model.refreshViewport()
+		}
+		return model, nil
+	case "e":
+		if !model.rawView &&
+			(model.tab == ovnTab || model.tab == ovsTab) {
+			model.expanded = !model.expanded
+			model.refreshViewport()
+		}
+		return model, nil
+	case "H":
+		if model.tab != pathTab {
+			model.viewport.ScrollLeft(8)
+		}
+		return model, nil
+	case "L":
+		if model.tab != pathTab {
+			model.viewport.ScrollRight(8)
+		}
 		return model, nil
 	case "j", "down":
 		if model.tab == pathTab {
@@ -283,4 +313,5 @@ func (model *Model) refreshViewport() {
 	}
 	model.viewport.SetContent(model.traceContent())
 	model.viewport.GotoTop()
+	model.viewport.ScrollLeft(1 << 20)
 }

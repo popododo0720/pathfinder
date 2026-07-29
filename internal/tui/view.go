@@ -57,8 +57,20 @@ func (model Model) readyView() string {
 
 	helpText := "1/2/3/4 or h/l: tabs  •  j/k: select/scroll  •  " +
 		"g/G: top/bottom  •  r: rerun  •  q: quit"
+	if model.tab != pathTab {
+		helpText = "1/2/3/4 or h/l: tabs  •  j/k: scroll  •  " +
+			"H/L: horizontal  •  v: change view"
+		if !model.rawView &&
+			(model.tab == ovnTab || model.tab == ovsTab) {
+			helpText += "  •  e: expand"
+		}
+		helpText += "  •  r: rerun  •  q: quit"
+	}
 	if model.width < 110 {
 		helpText = "h/l tabs  •  j/k move  •  r rerun  •  q quit"
+		if model.tab != pathTab {
+			helpText = "h/l tabs  •  j/k scroll  •  v view  •  q quit"
+		}
 	}
 	help := helpStyle.Render(helpText)
 	body := lipgloss.JoinVertical(
@@ -358,11 +370,7 @@ func (model Model) traceContent() string {
 		case model.result.OVN == nil:
 			return "No OVN result"
 		default:
-			return fmt.Sprintf(
-				"MICROFLOW\n%s\n\nTRACE\n%s",
-				model.result.OVN.Microflow,
-				model.result.OVN.Trace,
-			)
+			return model.ovnTraceContent()
 		}
 	case ovsTab:
 		switch {
@@ -373,11 +381,7 @@ func (model Model) traceContent() string {
 		case model.result.OVS == nil:
 			return "No OVS result"
 		default:
-			return fmt.Sprintf(
-				"FLOW\n%s\n\nSOURCE EGRESS TRACE\n%s",
-				model.result.OVS.Flow,
-				model.result.OVS.Trace,
-			)
+			return model.ovsTraceContent()
 		}
 	case probeTab:
 		return model.probeContent()

@@ -52,6 +52,10 @@ var (
 	helpStyle = lipgloss.NewStyle().
 			Foreground(colorMuted)
 
+	traceForwardStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(colorAccent)
+
 	spinnerStyle = lipgloss.NewStyle().
 			Foreground(colorAccent)
 )

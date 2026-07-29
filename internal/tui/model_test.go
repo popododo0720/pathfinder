@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -57,13 +58,27 @@ func TestModelSwitchesToTraceTabs(t *testing.T) {
 	if model.tab != ovnTab {
 		t.Fatalf("tab = %d, want OVN tab", model.tab)
 	}
-	if !strings.Contains(model.View(), "ovn trace output") {
-		t.Fatalf("OVN trace is missing:\n%s", model.View())
+	if !strings.Contains(model.View(), "OVN LOGICAL TRACE") ||
+		!strings.Contains(model.View(), "FORWARD ACTION") {
+		t.Fatalf("OVN summary is missing:\n%s", model.View())
+	}
+	if strings.Contains(model.View(), "OVN_RAW_SENTINEL") {
+		t.Fatalf("OVN raw trace is visible by default:\n%s", model.View())
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	if !strings.Contains(model.View(), "OVN_RAW_SENTINEL") {
+		t.Fatalf("OVN raw trace toggle failed:\n%s", model.View())
 	}
 
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
 	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-	if !strings.Contains(model.View(), "ovs trace output") {
-		t.Fatalf("OVS trace is missing:\n%s", model.View())
+	if !strings.Contains(model.View(), "OVS DATAPATH TRACE") ||
+		!strings.Contains(model.View(), "T0") ||
+		!strings.Contains(model.View(), "FORWARD ACTION") {
+		t.Fatalf("OVS summary is missing:\n%s", model.View())
+	}
+	if strings.Contains(model.View(), "OVS_RAW_SENTINEL") {
+		t.Fatalf("OVS raw trace is visible by default:\n%s", model.View())
 	}
 
 	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
@@ -78,6 +93,83 @@ func TestModelSwitchesToTraceTabs(t *testing.T) {
 	}
 	if strings.Contains(model.View(), "RAW_CAPTURE_MUST_NOT_RENDER") {
 		t.Fatalf("raw capture was rendered:\n%s", model.View())
+	}
+}
+
+func TestTraceSummaryExpandsAndRawViewScrollsHorizontally(
+	t *testing.T,
+) {
+	t.Parallel()
+
+	model := testModel()
+	result := testResult()
+	var trace strings.Builder
+	trace.WriteString("bridge(\"br-int\")\n")
+	for table := 0; table < 20; table++ {
+		trace.WriteString(
+			fmt.Sprintf(
+				" %d. priority 100,metadata=0x%x\n    resubmit(,%d)\n",
+				table,
+				table,
+				table+1,
+			),
+		)
+	}
+	trace.WriteString(
+		"Datapath actions: output:123456789012345678901234567890",
+	)
+	result.OVS.Trace = trace.String()
+
+	model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	model.Update(analysisFinishedMsg{
+		generation: model.generation,
+		result:     result,
+	})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	if !strings.Contains(model.traceContent(), "stages hidden") {
+		t.Fatalf(
+			"long summary was not collapsed:\n%s",
+			model.traceContent(),
+		)
+	}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	if strings.Contains(model.traceContent(), "stages hidden") {
+		t.Fatalf("summary did not expand:\n%s", model.traceContent())
+	}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'L'}})
+	if model.viewport.HorizontalScrollPercent() == 0 {
+		t.Fatal("raw trace did not scroll horizontally")
+	}
+}
+
+func TestNewAnalysisResetsTraceViewMode(t *testing.T) {
+	t.Parallel()
+
+	model := testModel()
+	model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	model.Update(analysisFinishedMsg{
+		generation: model.generation,
+		result:     testResult(),
+	})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	if !model.rawView {
+		t.Fatal("raw view was not enabled")
+	}
+
+	model.generation++
+	model.Update(analysisFinishedMsg{
+		generation: model.generation,
+		result:     testResult(),
+	})
+	if model.rawView || model.expanded {
+		t.Fatal("new analysis did not reset trace view mode")
+	}
+	if strings.Contains(model.View(), "OVN_RAW_SENTINEL") {
+		t.Fatalf("raw trace remained visible:\n%s", model.View())
 	}
 }
 
@@ -252,12 +344,50 @@ func testResult() engine.Result {
 		OVNRequested: true,
 		OVSRequested: true,
 		OVN: &topology.OVNPath{
+			Source: topology.OVNEndpoint{
+				LogicalPort:   "source",
+				LogicalSwitch: "network",
+				ChassisName:   "stack2",
+				Up:            true,
+			},
+			Destination: topology.OVNEndpoint{
+				LogicalPort:   "destination",
+				LogicalSwitch: "network",
+				ChassisName:   "stack3",
+				Up:            true,
+			},
 			Microflow: "tcp.dst == 443",
-			Trace:     "ovn trace output",
+			Trace: `ingress(dp="network", inport="source")
+ 0. ls_in_port_sec_l2: inport == "source", priority 50
+    next;
+OVN_RAW_SENTINEL`,
+			SummaryTrace: `ingress(dp="network", inport="source") {
+    outport = "destination";
+    output;
+    egress(dp="network", inport="source", outport="destination") {
+        output;
+    };
+};`,
 		},
 		OVS: &topology.OVSPath{
-			Flow:  "tcp,tp_dst=443",
-			Trace: "ovs trace output",
+			Source: topology.OVSEndpoint{
+				Host:      "stack2",
+				Interface: "tap-source",
+				OFPort:    10,
+				LinkState: "up",
+			},
+			Destination: topology.OVSEndpoint{
+				Host:      "stack3",
+				Interface: "tap-destination",
+				OFPort:    11,
+				LinkState: "up",
+			},
+			Flow: "tcp,tp_dst=443",
+			Trace: `bridge("br-int")
+ 0. priority 100
+    output:12
+Datapath actions: 12
+OVS_RAW_SENTINEL`,
 		},
 		ProbeRequested: true,
 		Probe: &topology.ProbeResult{
