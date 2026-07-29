@@ -15,8 +15,11 @@ func main() {
 func newRootCommand() *cobra.Command {
 	flags := &analysisFlags{}
 	rootCommand := &cobra.Command{
-		Use:          "pf SOURCE DESTINATION [MICROFLOW]",
-		Short:        "Trace packet paths through OpenStack, OVN, and OVS",
+		Use:   "pf SOURCE_SELECTOR DESTINATION_SELECTOR [MICROFLOW]",
+		Short: "Trace packet paths through OpenStack, OVN, and OVS",
+		Long: "Trace packet paths through OpenStack, OVN, and OVS.\n\n" +
+			"Endpoint selectors accept a Neutron port UUID, ip:ADDR, " +
+			"port:NAME,\nvm-id:UUID, vm:NAME, or vm:NAME@IP.",
 		SilenceUsage: true,
 		Args:         cobra.RangeArgs(2, 3),
 		PreRunE: func(_ *cobra.Command, _ []string) error {

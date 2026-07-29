@@ -77,11 +77,20 @@ func Analyze(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("create Neutron client: %w", err)
 	}
+	sourcePortID, destinationPortID, err := resolveEndpointSelectors(
+		ctx,
+		cloud.NewEndpointSelectorResolver(networkClient),
+		options.SourcePortID,
+		options.DestinationPortID,
+	)
+	if err != nil {
+		return Result{}, err
+	}
 	result.Neutron, err = cloud.DiscoverNeutronPath(
 		ctx,
 		networkClient,
-		options.SourcePortID,
-		options.DestinationPortID,
+		sourcePortID,
+		destinationPortID,
 	)
 	result.Timings.Neutron = time.Since(neutronStarted)
 	if err != nil {
