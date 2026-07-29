@@ -42,7 +42,8 @@ func NewNetworkClient(ctx context.Context) (*gophercloud.ServiceClient, error) {
 func authOptionsFromEnvironment() (gophercloud.AuthOptions, error) {
 	auth, err := openstack.AuthOptionsFromEnv()
 	if err != nil {
-		if !hasSplitDomainEnvironment() {
+		if !hasSplitDomainEnvironment() &&
+			os.Getenv("OS_USER_ID") == "" {
 			return gophercloud.AuthOptions{}, err
 		}
 		auth, err = splitDomainAuthOptionsFromEnvironment()

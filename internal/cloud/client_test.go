@@ -51,6 +51,23 @@ func TestAuthOptionsSupportSeparateUserAndProjectDomains(t *testing.T) {
 	}
 }
 
+func TestAuthOptionsSupportStandardUserIDSpelling(t *testing.T) {
+	clearOpenStackEnvironment(t)
+	t.Setenv("OS_AUTH_URL", "https://identity.example/v3")
+	t.Setenv("OS_USER_ID", "user-id")
+	t.Setenv("OS_PASSWORD", "secret")
+	t.Setenv("OS_PROJECT_ID", "project-id")
+
+	auth, err := authOptionsFromEnvironment()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth.UserID != "user-id" || auth.Scope == nil ||
+		auth.Scope.ProjectID != "project-id" {
+		t.Fatalf("auth = %+v", auth)
+	}
+}
+
 func TestEndpointOptionsRespectOSInterface(t *testing.T) {
 	clearOpenStackEnvironment(t)
 	t.Setenv("OS_INTERFACE", "internal")
